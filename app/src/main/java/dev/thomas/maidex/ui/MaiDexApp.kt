@@ -45,6 +45,8 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -145,27 +147,24 @@ fun MaiDexApp(viewModel: MainViewModel) {
                     IconButton(onClick = { showAbout = true }) {
                         Icon(Icons.Default.Info, contentDescription = "About catalog")
                     }
-                    Box {
-                        IconButton(onClick = { showFilters = true }) {
-                            Icon(Icons.Default.FilterList, contentDescription = "Open filters")
-                        }
-                        if (state.filters.activeCount > 0) {
-                            Surface(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(20.dp),
-                                color = MaterialTheme.colorScheme.primary,
-                                shape = RoundedCornerShape(10.dp),
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
+                    BadgedBox(
+                        badge = {
+                            if (state.filters.activeCount > 0) {
+                                Badge(
+                                    modifier = Modifier.size(20.dp),
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                                ) {
                                     Text(
                                         state.filters.activeCount.toString(),
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                     )
                                 }
                             }
+                        },
+                    ) {
+                        IconButton(onClick = { showFilters = true }) {
+                            Icon(Icons.Default.FilterList, contentDescription = "Open filters")
                         }
                     }
                 },
@@ -289,45 +288,43 @@ private fun CatalogContent(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SortMenu(selected = state.sort, onSelect = onSort)
-                AssistChip(
-                    onClick = onToggleSortOrder,
-                    label = { Text(state.sortOrder.label) },
-                    leadingIcon = {
-                        Icon(
-                            if (state.sortOrder == SortOrder.ASCENDING) {
-                                Icons.Default.ArrowUpward
-                            } else {
-                                Icons.Default.ArrowDownward
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    },
-                )
-            }
-            Row(
+            SortMenu(
+                selected = state.sort,
+                onSelect = onSort,
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                FilterChip(
-                    selected = state.filters.showUtage,
-                    onClick = onToggleUtage,
-                    label = {
-                        Text(if (state.filters.showUtage) "UTAGE: shown" else "UTAGE: hidden")
-                    },
-                )
-                if (state.filters.activeCount > 0) {
-                    TextButton(onClick = onClearFilters) {
-                        Icon(Icons.Default.Clear, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Clear filters")
-                    }
+            )
+            AssistChip(
+                onClick = onToggleSortOrder,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(state.sortOrder.label) },
+                leadingIcon = {
+                    Icon(
+                        if (state.sortOrder == SortOrder.ASCENDING) {
+                            Icons.Default.ArrowUpward
+                        } else {
+                            Icons.Default.ArrowDownward
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+            )
+            FilterChip(
+                selected = state.filters.showUtage,
+                onClick = onToggleUtage,
+                modifier = Modifier.fillMaxWidth(),
+                label = {
+                    Text(if (state.filters.showUtage) "UTAGE: shown" else "UTAGE: hidden")
+                },
+            )
+            if (state.filters.activeCount > 0) {
+                TextButton(
+                    onClick = onClearFilters,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Clear, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Clear filters")
                 }
             }
         }
@@ -363,11 +360,16 @@ private fun CatalogContent(
 }
 
 @Composable
-private fun SortMenu(selected: ChartSort, onSelect: (ChartSort) -> Unit) {
+private fun SortMenu(
+    selected: ChartSort,
+    onSelect: (ChartSort) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     var expanded by remember { mutableStateOf(false) }
-    Box {
+    Box(modifier) {
         AssistChip(
             onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth(),
             label = { Text("Sort: ${selected.label}") },
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
