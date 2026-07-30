@@ -2,6 +2,9 @@ package dev.thomas.maidex.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.webkit.CookieManager
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,10 +36,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -65,6 +70,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -73,6 +79,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,12 +90,23 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import dev.thomas.maidex.CatalogUiState
+import dev.thomas.maidex.ImportStatus
 import dev.thomas.maidex.MainViewModel
+import dev.thomas.maidex.data.AccountRegion
 import dev.thomas.maidex.data.ChartFilters
 import dev.thomas.maidex.data.ChartSort
+import dev.thomas.maidex.data.ComboMedal
 import dev.thomas.maidex.data.FilterOptions
 import dev.thomas.maidex.data.SongChart
+import dev.thomas.maidex.data.Grade
+import dev.thomas.maidex.data.JudgeCounts
+import dev.thomas.maidex.data.PlayDetail
+import dev.thomas.maidex.data.PlayerProfile
 import java.util.Locale
+import dev.thomas.maidex.data.SyncMedal
+import dev.thomas.maidex.data.UserScore
+import dev.thomas.maidex.rating.AchievementLossCalculator
+import dev.thomas.maidex.rating.RatingCalculator
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,6 +115,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
     var showFilters by remember { mutableStateOf(false) }
     var selectedChart by remember { mutableStateOf<SongChart?>(null) }
     var showAbout by remember { mutableStateOf(false) }
+    var showAccount by remember { mutableStateOf(false) }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -118,6 +138,9 @@ fun MaiDexApp(viewModel: MainViewModel) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showAccount = true }) {
+                        Icon(Icons.Default.AccountCircle, contentDescription = "DX NET account")
+                    }
                     IconButton(onClick = { showAbout = true }) {
                         Icon(Icons.Default.Info, contentDescription = "About catalog")
                     }
@@ -182,6 +205,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
         FilterDialog(
             filters = state.filters,
             options = state.options,
+            hasScores = state.scores.isNotEmpty(),
             onDismiss = { showFilters = false },
             onApply = {
                 viewModel.applyFilters(it)
@@ -190,7 +214,23 @@ fun MaiDexApp(viewModel: MainViewModel) {
         )
     }
     selectedChart?.let { chart ->
-        ChartDetailDialog(chart = chart, onDismiss = { selectedChart = null })
+        ChartDetailDialog(
+            chart = chart,
+            score = state.scores[chart.chartKey],
+            playDetail = state.playDetails[chart.chartKey],
+            state = state,
+            onDismiss = { selectedChart = null },
+        )
+    }
+    if (showAccount) {
+        AccountDialog(
+            profile = state.profile,
+            importStatus = state.importStatus,
+            onImport = viewModel::importAccount,
+            onClear = viewModel::clearAccount,
+            onDismissStatus = viewModel::dismissImportStatus,
+            onDismiss = { showAccount = false },
+        )
     }
     if (showAbout) {
         AlertDialog(
@@ -200,7 +240,8 @@ fun MaiDexApp(viewModel: MainViewModel) {
                 Text(
                     "${state.info?.songCount ?: 0} songs and ${state.info?.chartCount ?: 0} charts. " +
                         "Metadata: arcade-songs, updated ${state.info?.updateTime?.take(10).orEmpty()}. " +
-                        "Community English aliases improve romanised search. Cover art is cached after loading.",
+                        "Community English aliases improve romanised search. Cover art is cached after loading. " +
+                        "DX NET cookies and imported scores remain on this device.",
                 )
             },
             confirmButton = { TextButton(onClick = { showAbout = false }) { Text("Close") } },
@@ -278,7 +319,11 @@ private fun CatalogContent(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(state.charts, key = { it.id }) { chart ->
-                    ChartCard(chart, onClick = { onChart(chart) })
+                    ChartCard(
+                        chart = chart,
+                        score = state.scores[chart.chartKey],
+                        onClick = { onChart(chart) },
+                    )
                 }
             }
         }
@@ -308,7 +353,7 @@ private fun SortMenu(selected: ChartSort, onSelect: (ChartSort) -> Unit) {
 }
 
 @Composable
-private fun ChartCard(chart: SongChart, onClick: () -> Unit) {
+private fun ChartCard(chart: SongChart, score: UserScore?, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -385,16 +430,56 @@ private fun ChartCard(chart: SongChart, onClick: () -> Unit) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (score != null) {
+                    HorizontalDivider(Modifier.padding(vertical = 7.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            String.format(Locale.US, "%.4f%%", score.achievement),
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        MedalPill(score.grade.label, MaterialTheme.colorScheme.primaryContainer)
+                        Spacer(Modifier.weight(1f))
+                        RatingCalculator.chartRating(chart, score)?.let {
+                            Text("Rt $it", style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (score.comboMedal != ComboMedal.NONE) {
+                            MedalPill(score.comboMedal.label, Color(0xFFFFD9E4))
+                        }
+                        if (score.syncMedal != SyncMedal.NONE) {
+                            MedalPill(score.syncMedal.label, Color(0xFFD4E8FF))
+                        }
+                    }
+                }
             }
         }
     }
 }
+@Composable
+private fun MedalPill(label: String, color: Color) {
+    Surface(color = color, shape = RoundedCornerShape(7.dp)) {
+        Text(
+            label,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+        )
+    }
+}
+
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FilterDialog(
     filters: ChartFilters,
     options: FilterOptions,
+    hasScores: Boolean,
     onDismiss: () -> Unit,
     onApply: (ChartFilters) -> Unit,
 ) {
@@ -483,6 +568,48 @@ private fun FilterDialog(
                             onCheckedChange = { draft = draft.copy(knownConstantsOnly = it) },
                         )
                     }
+                    if (hasScores) {
+                        Text(
+                            "My scores",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Played charts only", modifier = Modifier.weight(1f))
+                            Switch(
+                                checked = draft.scoredOnly,
+                                onCheckedChange = { draft = draft.copy(scoredOnly = it) },
+                            )
+                        }
+                        MultiSelectSection(
+                            "Rank",
+                            Grade.entries,
+                            draft.grades,
+                            label = Grade::label,
+                        ) { draft = draft.copy(grades = it) }
+                        MultiSelectSection(
+                            "Achievement medal",
+                            ComboMedal.entries.filterNot { it == ComboMedal.NONE },
+                            draft.comboMedals,
+                            label = ComboMedal::label,
+                        ) { draft = draft.copy(comboMedals = it) }
+                        MultiSelectSection(
+                            "Sync medal",
+                            SyncMedal.entries.filterNot { it == SyncMedal.NONE },
+                            draft.syncMedals,
+                            label = SyncMedal::label,
+                        ) { draft = draft.copy(syncMedals = it) }
+                        HorizontalDivider()
+                    } else {
+                        Text(
+                            "Sign in to DX NET to filter by rank, achievement medal, and sync medal.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     MultiSelectSection("Category", options.categories, draft.categories) {
                         draft = draft.copy(categories = it)
                     }
@@ -566,12 +693,12 @@ private fun RangeFields(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MultiSelectSection(
+private fun <T> MultiSelectSection(
     title: String,
-    options: List<String>,
-    selected: Set<String>,
-    label: (String) -> String = { it },
-    onChange: (Set<String>) -> Unit,
+    options: List<T>,
+    selected: Set<T>,
+    label: (T) -> String = { it.toString() },
+    onChange: (Set<T>) -> Unit,
 ) {
     Column {
         Text(title, fontWeight = FontWeight.SemiBold)
@@ -590,7 +717,182 @@ private fun MultiSelectSection(
 }
 
 @Composable
-private fun ChartDetailDialog(chart: SongChart, onDismiss: () -> Unit) {
+private fun AccountDialog(
+    profile: PlayerProfile?,
+    importStatus: ImportStatus,
+    onImport: (AccountRegion) -> Unit,
+    onClear: () -> Unit,
+    onDismissStatus: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var region by remember(profile) { mutableStateOf(profile?.region ?: AccountRegion.INTERNATIONAL) }
+    var showWebView by remember { mutableStateOf(profile == null) }
+    val isImporting = importStatus is ImportStatus.Running
+
+    Dialog(onDismissRequest = {
+        onDismissStatus()
+        onDismiss()
+    }) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.96f),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("maimai DX NET", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Official site sign-in; credentials never enter MaiDex",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = {
+                        onDismissStatus()
+                        onDismiss()
+                    }) { Text("Close") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AccountRegion.entries.forEach { option ->
+                        FilterChip(
+                            selected = region == option,
+                            enabled = !isImporting,
+                            onClick = {
+                                region = option
+                                showWebView = true
+                            },
+                            label = { Text(option.label) },
+                        )
+                    }
+                }
+                profile?.let {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.AccountCircle, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(it.name, fontWeight = FontWeight.Bold)
+                                Text("Official rating ${it.officialRating} · ${it.region.label}")
+                            }
+                        }
+                    }
+                }
+                when (importStatus) {
+                    is ImportStatus.Running -> Row(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 3.dp)
+                        Spacer(Modifier.width(9.dp))
+                        Text(importStatus.message)
+                    }
+                    is ImportStatus.Success -> Text(
+                        "Imported ${importStatus.imported} scores and ${importStatus.recentDetails} recent details" +
+                            if (importStatus.unmatched > 0) " · ${importStatus.unmatched} unmatched" else "",
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    is ImportStatus.Failure -> Text(
+                        importStatus.message,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    ImportStatus.Idle -> Unit
+                }
+                if (showWebView) {
+                    Text(
+                        "Complete sign-in below, return to the DX NET home page, then tap Import scores.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                    key(region) {
+                        AndroidView(
+                            factory = { context ->
+                                WebView(context).apply {
+                                    settings.javaScriptEnabled = true
+                                    settings.domStorageEnabled = true
+                                    settings.loadsImagesAutomatically = true
+                                    val webView = this
+                                    CookieManager.getInstance().apply {
+                                        setAcceptCookie(true)
+                                        setAcceptThirdPartyCookies(webView, true)
+                                    }
+                                    webViewClient = WebViewClient()
+                                    loadUrl(region.loginUrl)
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            onRelease = WebView::destroy,
+                        )
+                    }
+                } else {
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        Text(
+                            "Open DX NET to renew the login, or import with the saved session.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { showWebView = !showWebView },
+                        enabled = !isImporting,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(if (showWebView) "Hide DX NET" else "Open DX NET")
+                    }
+                    Button(
+                        onClick = { onImport(region) },
+                        enabled = !isImporting,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Import scores")
+                    }
+                }
+                if (profile != null) {
+                    TextButton(
+                        onClick = onClear,
+                        enabled = !isImporting,
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                    ) { Text("Remove imported account data") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChartDetailDialog(
+    chart: SongChart,
+    score: UserScore?,
+    playDetail: PlayDetail?,
+    state: CatalogUiState,
+    onDismiss: () -> Unit,
+) {
     val context = LocalContext.current
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -661,6 +963,16 @@ private fun ChartDetailDialog(chart: SongChart, onDismiss: () -> Unit) {
                 DetailRow("Regions", chart.regions.codes().joinToString { regionLabel(it) })
                 Spacer(Modifier.height(8.dp))
                 NoteCountTable(chart)
+                if (score != null) {
+                    ScoreSection(chart, score, playDetail, state)
+                } else {
+                    HorizontalDivider(Modifier.padding(vertical = 12.dp))
+                    Text("My score", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Sign in to DX NET to import this chart's achievement, rank, and medals.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 chart.comment?.takeIf(String::isNotBlank)?.let {
                     HorizontalDivider(Modifier.padding(vertical = 12.dp))
                     Text(it)
@@ -675,7 +987,7 @@ private fun ChartDetailDialog(chart: SongChart, onDismiss: () -> Unit) {
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Icon(Icons.Default.OpenInNew, contentDescription = null)
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("Search on YouTube")
                 }
@@ -686,6 +998,191 @@ private fun ChartDetailDialog(chart: SongChart, onDismiss: () -> Unit) {
             }
         }
     }
+}
+
+@Composable
+private fun ScoreSection(
+    chart: SongChart,
+    score: UserScore,
+    playDetail: PlayDetail?,
+    state: CatalogUiState,
+) {
+    HorizontalDivider(Modifier.padding(vertical = 12.dp))
+    Text("My score", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            String.format(Locale.US, "%.4f%%", score.achievement),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        MedalPill(score.grade.label, MaterialTheme.colorScheme.primaryContainer)
+        if (score.comboMedal != ComboMedal.NONE) MedalPill(score.comboMedal.label, Color(0xFFFFD9E4))
+        if (score.syncMedal != SyncMedal.NONE) MedalPill(score.syncMedal.label, Color(0xFFD4E8FF))
+    }
+    DetailRow("DX score", "${score.dxScore} / ${score.maxDxScore}")
+    DetailRow("Chart rating", RatingCalculator.chartRating(chart, score)?.toString() ?: "Unknown constant")
+    DetailRow(
+        "Total rating",
+        "${state.calculatedRating} calculated" +
+            (state.profile?.officialRating?.let { "  ·  $it official" } ?: ""),
+    )
+
+    val milestones = remember(chart.chartKey, score, state.scores) {
+        RatingCalculator.milestones(
+            chart = chart,
+            score = score,
+            charts = state.allCharts,
+            scores = state.scores,
+            newVersions = state.newVersions,
+        )
+    }
+    if (milestones.isNotEmpty() && chart.constant != null) {
+        Spacer(Modifier.height(12.dp))
+        Text("Next rating milestones", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(
+            "AP and AP+ receive the current CiRCLE-era +1 rating bonus. Achievement is capped at 100.5%.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        milestones.forEach { milestone ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 5.dp),
+            ) {
+                Row(Modifier.fillMaxWidth()) {
+                    Text(milestone.label, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    Text(String.format(Locale.US, "%.4f%%", milestone.achievement))
+                }
+                Row(Modifier.fillMaxWidth()) {
+                    Text(
+                        "Chart Rt ${milestone.chartRating ?: "—"}",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        if (milestone.totalChange >= 0) {
+                            "+${milestone.totalChange} total rating"
+                        } else {
+                            "${milestone.totalChange} total rating"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+    }
+    if (playDetail != null) {
+        JudgmentDetail(chart, playDetail)
+    } else {
+        Spacer(Modifier.height(12.dp))
+        Text("Judgement breakdown", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(
+            "DX NET exposes detailed judgements for the 50 most recent plays. Play this chart and import again to attach a breakdown.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun JudgmentDetail(chart: SongChart, detail: PlayDetail) {
+    var showLossTable by remember { mutableStateOf(false) }
+    Spacer(Modifier.height(14.dp))
+    Text("Latest detailed play", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Text(
+        "${detail.playedAt.ifBlank { "Recent play" }}  ·  " +
+            String.format(Locale.US, "%.4f%%", detail.achievement) +
+            "  ·  FAST ${detail.fast} / LATE ${detail.late}",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+    ) {
+        Row(Modifier.padding(vertical = 5.dp)) {
+            TableCell("Note", 62, true)
+            TableCell("CP", 48, true)
+            TableCell("P", 48, true)
+            TableCell("Great", 54, true)
+            TableCell("Good", 50, true)
+            TableCell("Miss", 50, true)
+        }
+        JudgeRow("Tap", detail.judgments.tap)
+        JudgeRow("Hold", detail.judgments.hold)
+        JudgeRow("Slide", detail.judgments.slide)
+        JudgeRow("Touch", detail.judgments.touch)
+        JudgeRow("Break", detail.judgments.breakNotes)
+    }
+    val loss = AchievementLossCalculator.actualLossRange(chart.noteCounts, detail.judgments)
+    val lossText = if (kotlin.math.abs(loss.maximum - loss.minimum) < 0.0000001) {
+        String.format(Locale.US, "%.6f percentage points", loss.minimum)
+    } else {
+        String.format(Locale.US, "%.6f–%.6f percentage points", loss.minimum, loss.maximum)
+    }
+    DetailRow("Judgement loss", lossText)
+    Text(
+        "A range is shown when DX NET groups near/far Break Perfects or high/mid/low Break Greats together.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    TextButton(onClick = { showLossTable = !showLossTable }) {
+        Text(if (showLossTable) "Hide per-judgement losses" else "Show per-judgement losses")
+    }
+    if (showLossTable) {
+        Text(
+            "Loss from one judgement on this chart. Non-Break Perfect loses 0 achievement but 1 DX score.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        AchievementLossCalculator.perJudgment(chart.noteCounts).forEach { row ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+            ) {
+                Text(row.noteType, modifier = Modifier.width(52.dp), style = MaterialTheme.typography.labelMedium)
+                Text(row.judgment, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                Text(
+                    String.format(Locale.US, "−%.6f pp", row.achievementLoss),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("DX −${row.dxScoreLoss}", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun JudgeRow(name: String, counts: JudgeCounts) {
+    Row(Modifier.padding(vertical = 3.dp)) {
+        TableCell(name, 62, true)
+        TableCell(counts.criticalPerfect.toString(), 48)
+        TableCell(counts.perfect.toString(), 48)
+        TableCell(counts.great.toString(), 54)
+        TableCell(counts.good.toString(), 50)
+        TableCell(counts.miss.toString(), 50)
+    }
+}
+
+@Composable
+private fun TableCell(value: String, width: Int, bold: Boolean = false) {
+    Text(
+        value,
+        modifier = Modifier.width(width.dp),
+        style = MaterialTheme.typography.bodySmall,
+        fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+    )
 }
 
 @Composable

@@ -109,6 +109,10 @@ data class ChartFilters(
     val minBpm: Int? = null,
     val maxBpm: Int? = null,
     val knownConstantsOnly: Boolean = false,
+    val grades: Set<Grade> = emptySet(),
+    val comboMedals: Set<ComboMedal> = emptySet(),
+    val syncMedals: Set<SyncMedal> = emptySet(),
+    val scoredOnly: Boolean = false,
 ) {
     val activeCount: Int
         get() = listOf(
@@ -124,6 +128,10 @@ data class ChartFilters(
             minBpm != null,
             maxBpm != null,
             knownConstantsOnly,
+            grades.isNotEmpty(),
+            comboMedals.isNotEmpty(),
+            syncMedals.isNotEmpty(),
+            scoredOnly,
         ).count { it }
 }
 
@@ -131,6 +139,9 @@ enum class ChartSort(val label: String) {
     CONSTANT_DESC("Constant"),
     LEVEL_ASC("Level"),
     TITLE_ASC("Title"),
+    RATING_DESC("Rating"),
+    ACHIEVEMENT_DESC("Achievement"),
+    GRADE_DESC("Rank"),
     RELEASE_DESC("Release"),
     BPM_ASC("BPM"),
 }
