@@ -252,6 +252,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CatalogContent(
     state: CatalogUiState,
@@ -283,13 +284,12 @@ private fun CatalogContent(
             placeholder = { Text("Title, romaji, artist, or notes designer") },
             supportingText = { Text("Internal constants are shown in parentheses on every chart") },
         )
-        Row(
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             SortMenu(selected = state.sort, onSelect = onSort)
             AssistChip(
@@ -321,11 +321,16 @@ private fun CatalogContent(
                     leadingIcon = { Icon(Icons.Default.Clear, null, Modifier.size(18.dp)) },
                 )
             }
-            Text(
-                "${state.charts.size} charts",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelLarge,
-            )
+            Box(
+                modifier = Modifier.height(32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "${state.charts.size} charts",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
         if (state.charts.isEmpty()) {
