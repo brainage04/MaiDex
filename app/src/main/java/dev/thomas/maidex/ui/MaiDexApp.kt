@@ -252,7 +252,6 @@ fun MaiDexApp(viewModel: MainViewModel) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CatalogContent(
     state: CatalogUiState,
@@ -284,52 +283,52 @@ private fun CatalogContent(
             placeholder = { Text("Title, romaji, artist, or notes designer") },
             supportingText = { Text("Internal constants are shown in parentheses on every chart") },
         )
-        FlowRow(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            SortMenu(selected = state.sort, onSelect = onSort)
-            AssistChip(
-                onClick = onToggleSortOrder,
-                label = { Text(state.sortOrder.label) },
-                leadingIcon = {
-                    Icon(
-                        if (state.sortOrder == SortOrder.ASCENDING) {
-                            Icons.Default.ArrowUpward
-                        } else {
-                            Icons.Default.ArrowDownward
-                        },
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-            )
-            FilterChip(
-                selected = state.filters.showUtage,
-                onClick = onToggleUtage,
-                label = {
-                    Text(if (state.filters.showUtage) "UTAGE: shown" else "UTAGE: hidden")
-                },
-            )
-            if (state.filters.activeCount > 0) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SortMenu(selected = state.sort, onSelect = onSort)
                 AssistChip(
-                    onClick = onClearFilters,
-                    label = { Text("Clear ${state.filters.activeCount} filters") },
-                    leadingIcon = { Icon(Icons.Default.Clear, null, Modifier.size(18.dp)) },
+                    onClick = onToggleSortOrder,
+                    label = { Text(state.sortOrder.label) },
+                    leadingIcon = {
+                        Icon(
+                            if (state.sortOrder == SortOrder.ASCENDING) {
+                                Icons.Default.ArrowUpward
+                            } else {
+                                Icons.Default.ArrowDownward
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
                 )
             }
-            Box(
-                modifier = Modifier.height(32.dp),
-                contentAlignment = Alignment.Center,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    "${state.charts.size} charts",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelLarge,
+                FilterChip(
+                    selected = state.filters.showUtage,
+                    onClick = onToggleUtage,
+                    label = {
+                        Text(if (state.filters.showUtage) "UTAGE: shown" else "UTAGE: hidden")
+                    },
                 )
+                if (state.filters.activeCount > 0) {
+                    TextButton(onClick = onClearFilters) {
+                        Icon(Icons.Default.Clear, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Clear filters")
+                    }
+                }
             }
         }
         Spacer(Modifier.height(8.dp))
