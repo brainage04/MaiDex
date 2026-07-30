@@ -2,9 +2,6 @@ package dev.thomas.maidex.ui
 
 import android.content.Intent
 import android.net.Uri
-import android.webkit.CookieManager
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -70,7 +67,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -80,7 +76,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,6 +84,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import dev.thomas.maidex.DxNetLoginActivity
 import dev.thomas.maidex.CatalogUiState
 import dev.thomas.maidex.ImportStatus
 import dev.thomas.maidex.MainViewModel
@@ -726,7 +722,7 @@ private fun AccountDialog(
     onDismiss: () -> Unit,
 ) {
     var region by remember(profile) { mutableStateOf(profile?.region ?: AccountRegion.INTERNATIONAL) }
-    var showWebView by remember { mutableStateOf(profile == null) }
+    val context = LocalContext.current
     val isImporting = importStatus is ImportStatus.Running
 
     Dialog(onDismissRequest = {
@@ -763,10 +759,7 @@ private fun AccountDialog(
                         FilterChip(
                             selected = region == option,
                             enabled = !isImporting,
-                            onClick = {
-                                region = option
-                                showWebView = true
-                            },
+                            onClick = { region = option },
                             label = { Text(option.label) },
                         )
                     }
@@ -814,41 +807,17 @@ private fun AccountDialog(
                     )
                     ImportStatus.Idle -> Unit
                 }
-                if (showWebView) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Text(
-                        "Complete sign-in below, return to the DX NET home page, then tap Import scores.",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(bottom = 6.dp),
+                        "DX NET sign-in opens full screen so SNS login pages receive a full browser viewport. " +
+                            "MaiDex closes it automatically after DX NET confirms the login.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    key(region) {
-                        AndroidView(
-                            factory = { context ->
-                                WebView(context).apply {
-                                    settings.javaScriptEnabled = true
-                                    settings.domStorageEnabled = true
-                                    settings.loadsImagesAutomatically = true
-                                    val webView = this
-                                    CookieManager.getInstance().apply {
-                                        setAcceptCookie(true)
-                                        setAcceptThirdPartyCookies(webView, true)
-                                    }
-                                    webViewClient = WebViewClient()
-                                    loadUrl(region.loginUrl)
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            onRelease = WebView::destroy,
-                        )
-                    }
-                } else {
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        Text(
-                            "Open DX NET to renew the login, or import with the saved session.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                 }
                 Row(
                     modifier = Modifier
@@ -857,11 +826,11 @@ private fun AccountDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(
-                        onClick = { showWebView = !showWebView },
+                        onClick = { context.startActivity(DxNetLoginActivity.intent(context, region)) },
                         enabled = !isImporting,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text(if (showWebView) "Hide DX NET" else "Open DX NET")
+                        Text("Open sign-in")
                     }
                     Button(
                         onClick = { onImport(region) },

@@ -1,0 +1,3 @@
+[submodule "tools/VaultCredentialTool"]
+	path = tools/VaultCredentialTool
+	url = https://github.com/brainage04/VaultCredentialTool.git

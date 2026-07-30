@@ -186,7 +186,7 @@ class MaimaiDxClient(
             val titleElement = block.selectFirst(
                 ".basic_block.m_5.m_t_17.m_r_60, .basic_block.m_5.p_5.p_l_10.f_13.break",
             ) ?: return@mapNotNull null
-            val title = titleElement.clone().also { it.select("img").remove() }.text().trim()
+            val title = extractRecentTitle(titleElement)
             val difficulty = when (imageName(block.selectFirst(".playlog_diff"))) {
                 "diff_advanced" -> "advanced"
                 "diff_expert" -> "expert"
@@ -243,6 +243,12 @@ class MaimaiDxClient(
         )
     }
 }
+internal fun extractRecentTitle(titleElement: Element): String =
+    titleElement.clone()
+        .also { it.select("img, .playlog_level_icon").remove() }
+        .text()
+        .trim()
+
 
 class AuthenticationRequiredException(message: String) : IllegalStateException(message)
 

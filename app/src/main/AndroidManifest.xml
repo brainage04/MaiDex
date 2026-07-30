@@ -8,6 +8,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MaiDex">
         <activity
+            android:name=".DxNetLoginActivity"
+            android:exported="false" />
+        <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
