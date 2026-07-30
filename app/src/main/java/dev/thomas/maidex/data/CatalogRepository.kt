@@ -41,7 +41,7 @@ class CatalogRepository(private val context: Context) {
                 c.id, c.chart_key, s.source_id, s.category, s.title, s.title_romanized,
                 s.title_aliases, s.artist, s.artist_romanized, s.bpm, s.image_url,
                 s.version, s.release_date, s.comment, c.type, c.difficulty, c.level,
-                c.level_value, c.chart_constant, c.note_designer,
+                c.level_value, c.internal_level, c.note_designer,
                 c.note_designer_romanized, c.tap_count, c.hold_count, c.slide_count,
                 c.touch_count, c.break_count, c.total_count, c.region_jp,
                 c.region_intl, c.region_usa, c.region_cn, c.version, c.is_special

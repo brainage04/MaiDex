@@ -103,12 +103,13 @@ data class ChartFilters(
     val difficulties: Set<String> = emptySet(),
     val versions: Set<String> = emptySet(),
     val types: Set<String> = emptySet(),
+    val showUtage: Boolean = true,
     val regions: Set<String> = emptySet(),
     val minLevel: Double? = null,
     val maxLevel: Double? = null,
     val minBpm: Int? = null,
     val maxBpm: Int? = null,
-    val knownConstantsOnly: Boolean = false,
+    val constantAvailability: ConstantAvailability = ConstantAvailability.BOTH,
     val grades: Set<Grade> = emptySet(),
     val comboMedals: Set<ComboMedal> = emptySet(),
     val syncMedals: Set<SyncMedal> = emptySet(),
@@ -122,12 +123,13 @@ data class ChartFilters(
             difficulties.isNotEmpty(),
             versions.isNotEmpty(),
             types.isNotEmpty(),
+            !showUtage,
             regions.isNotEmpty(),
             minLevel != null,
             maxLevel != null,
             minBpm != null,
             maxBpm != null,
-            knownConstantsOnly,
+            constantAvailability != ConstantAvailability.BOTH,
             grades.isNotEmpty(),
             comboMedals.isNotEmpty(),
             syncMedals.isNotEmpty(),
@@ -135,15 +137,26 @@ data class ChartFilters(
         ).count { it }
 }
 
+enum class ConstantAvailability(val label: String) {
+    BOTH("Both"),
+    KNOWN("Known constants only"),
+    UNKNOWN("Unknown constants only"),
+}
+
 enum class ChartSort(val label: String) {
-    CONSTANT_DESC("Constant"),
-    LEVEL_ASC("Level"),
-    TITLE_ASC("Title"),
-    RATING_DESC("Rating"),
-    ACHIEVEMENT_DESC("Achievement"),
-    GRADE_DESC("Rank"),
-    RELEASE_DESC("Release"),
-    BPM_ASC("BPM"),
+    CONSTANT("Constant"),
+    LEVEL("Level"),
+    TITLE("Title"),
+    RATING("Rating"),
+    ACHIEVEMENT("Achievement"),
+    GRADE("Rank"),
+    RELEASE("Release"),
+    BPM("BPM"),
+}
+
+enum class SortOrder(val label: String) {
+    ASCENDING("Ascending"),
+    DESCENDING("Descending"),
 }
 
 data class CatalogInfo(

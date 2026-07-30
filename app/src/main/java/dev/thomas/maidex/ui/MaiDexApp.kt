@@ -32,6 +32,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.FilterList
@@ -94,11 +97,13 @@ import dev.thomas.maidex.data.ChartSort
 import dev.thomas.maidex.data.ComboMedal
 import dev.thomas.maidex.data.FilterOptions
 import dev.thomas.maidex.data.SongChart
+import dev.thomas.maidex.data.ConstantAvailability
 import dev.thomas.maidex.data.Grade
 import dev.thomas.maidex.data.JudgeCounts
 import dev.thomas.maidex.data.PlayDetail
 import dev.thomas.maidex.data.PlayerProfile
 import java.util.Locale
+import dev.thomas.maidex.data.SortOrder
 import dev.thomas.maidex.data.SyncMedal
 import dev.thomas.maidex.data.UserScore
 import dev.thomas.maidex.rating.AchievementLossCalculator
@@ -191,6 +196,8 @@ fun MaiDexApp(viewModel: MainViewModel) {
                 modifier = Modifier.padding(padding),
                 onSearch = viewModel::setSearch,
                 onSort = viewModel::setSort,
+                onToggleSortOrder = viewModel::toggleSortOrder,
+                onToggleUtage = viewModel::toggleUtageVisibility,
                 onClearFilters = viewModel::clearFilters,
                 onChart = { selectedChart = it },
             )
@@ -251,6 +258,8 @@ private fun CatalogContent(
     modifier: Modifier,
     onSearch: (String) -> Unit,
     onSort: (ChartSort) -> Unit,
+    onToggleSortOrder: () -> Unit,
+    onToggleUtage: () -> Unit,
     onClearFilters: () -> Unit,
     onChart: (SongChart) -> Unit,
 ) {
@@ -283,6 +292,28 @@ private fun CatalogContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             SortMenu(selected = state.sort, onSelect = onSort)
+            AssistChip(
+                onClick = onToggleSortOrder,
+                label = { Text(state.sortOrder.label) },
+                leadingIcon = {
+                    Icon(
+                        if (state.sortOrder == SortOrder.ASCENDING) {
+                            Icons.Default.ArrowUpward
+                        } else {
+                            Icons.Default.ArrowDownward
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+            )
+            FilterChip(
+                selected = state.filters.showUtage,
+                onClick = onToggleUtage,
+                label = {
+                    Text(if (state.filters.showUtage) "UTAGE: shown" else "UTAGE: hidden")
+                },
+            )
             if (state.filters.activeCount > 0) {
                 AssistChip(
                     onClick = onClearFilters,
@@ -319,6 +350,7 @@ private fun CatalogContent(
                         chart = chart,
                         score = state.scores[chart.chartKey],
                         onClick = { onChart(chart) },
+
                     )
                 }
             }
@@ -348,6 +380,42 @@ private fun SortMenu(selected: ChartSort, onSelect: (ChartSort) -> Unit) {
     }
 }
 
+@Composable
+private fun ConstantAvailabilityMenu(
+    selected: ConstantAvailability,
+    onSelect: (ConstantAvailability) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.Start,
+            ) {
+                Text("Constant availability", style = MaterialTheme.typography.labelMedium)
+                Text(selected.label)
+            }
+            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            ConstantAvailability.entries.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.label) },
+                    onClick = {
+                        onSelect(option)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
 @Composable
 private fun ChartCard(chart: SongChart, score: UserScore?, onClick: () -> Unit) {
     Card(
@@ -547,23 +615,10 @@ private fun FilterDialog(
                         onMinimum = { minBpm = it.filter(Char::isDigit) },
                         onMaximum = { maxBpm = it.filter(Char::isDigit) },
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Known constants only", fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "Hide charts without a published decimal constant",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = draft.knownConstantsOnly,
-                            onCheckedChange = { draft = draft.copy(knownConstantsOnly = it) },
-                        )
-                    }
+                    ConstantAvailabilityMenu(
+                        selected = draft.constantAvailability,
+                        onSelect = { draft = draft.copy(constantAvailability = it) },
+                    )
                     if (hasScores) {
                         Text(
                             "My scores",
