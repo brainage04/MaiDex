@@ -1,6 +1,7 @@
 package dev.thomas.maidex.rating
 
 import dev.thomas.maidex.data.ComboMedal
+import dev.thomas.maidex.data.JudgeCounts
 import dev.thomas.maidex.data.SongChart
 import dev.thomas.maidex.data.UserScore
 import kotlin.math.floor
@@ -80,6 +81,7 @@ object RatingCalculator {
         charts: List<SongChart>,
         scores: Map<String, UserScore>,
         newVersions: Set<String>,
+        breakJudgments: JudgeCounts? = null,
     ): List<RatingMilestone> {
         val currentTotal = totalRating(charts, scores, newVersions)
         val rankTargets = listOf(
@@ -93,28 +95,58 @@ object RatingCalculator {
             "SSS" to 100.0,
             "SSS+" to 100.5,
         ).filter { (_, target) -> target > score.achievement }
-            .map { (label, target) -> MilestoneTarget(label, target, false) }
+            .map { (label, target) -> MilestoneTarget(label, target, target, false) }
         val medalTargets = buildList {
             if (score.comboMedal < ComboMedal.AP) {
-                add(MilestoneTarget("AP (minimum)", maxOf(score.achievement, 100.0), true))
-            }
-            if (score.comboMedal < ComboMedal.AP_PLUS) {
-                add(MilestoneTarget("AP+", 101.0, true))
+                val breakCount = chart.noteCounts.breakNotes ?: 0
+                val recordedPerfects = breakJudgments?.perfect?.coerceIn(0, breakCount)
+                val label = breakJudgments?.let {
+                    "AP (${it.criticalPerfect}/${it.perfect})"
+                } ?: "AP"
+                val minimum = when {
+                    breakCount == 0 -> 100.0
+                    recordedPerfects != null -> 101.0 - recordedPerfects * 0.5 / breakCount
+                    else -> 100.5
+                }
+                val maximum = when {
+                    breakCount == 0 -> 100.0
+                    recordedPerfects != null -> 101.0 - recordedPerfects * 0.25 / breakCount
+                    else -> 101.0
+                }
+                add(MilestoneTarget(label, minimum, maximum, true))
             }
         }
         return (rankTargets + medalTargets).distinctBy { it.label }.map { target ->
-            val chartRating = chartRating(chart.constant, target.achievement, target.isAllPerfect)
-            val targetTotal = totalRating(
+            val minimumChartRating = chartRating(
+                chart.constant,
+                target.minimumAchievement,
+                target.isAllPerfect,
+            )
+            val maximumChartRating = chartRating(
+                chart.constant,
+                target.maximumAchievement,
+                target.isAllPerfect,
+            )
+            val minimumTotal = totalRating(
                 charts,
                 scores,
                 newVersions,
-                RatingOverride(chart.chartKey, target.achievement, target.isAllPerfect),
+                RatingOverride(chart.chartKey, target.minimumAchievement, target.isAllPerfect),
+            )
+            val maximumTotal = totalRating(
+                charts,
+                scores,
+                newVersions,
+                RatingOverride(chart.chartKey, target.maximumAchievement, target.isAllPerfect),
             )
             RatingMilestone(
                 label = target.label,
-                achievement = target.achievement,
-                chartRating = chartRating,
-                totalChange = targetTotal - currentTotal,
+                minimumAchievement = target.minimumAchievement,
+                maximumAchievement = target.maximumAchievement,
+                minimumChartRating = minimumChartRating,
+                maximumChartRating = maximumChartRating,
+                minimumTotalChange = minimumTotal - currentTotal,
+                maximumTotalChange = maximumTotal - currentTotal,
             )
         }
     }
@@ -122,9 +154,12 @@ object RatingCalculator {
 
 data class RatingMilestone(
     val label: String,
-    val achievement: Double,
-    val chartRating: Int?,
-    val totalChange: Int,
+    val minimumAchievement: Double,
+    val maximumAchievement: Double,
+    val minimumChartRating: Int?,
+    val maximumChartRating: Int?,
+    val minimumTotalChange: Int,
+    val maximumTotalChange: Int,
 )
 
 data class RatingOverride(
@@ -134,4 +169,9 @@ data class RatingOverride(
 )
 
 private data class RatingEntry(val value: Int, val isNew: Boolean)
-private data class MilestoneTarget(val label: String, val achievement: Double, val isAllPerfect: Boolean)
+private data class MilestoneTarget(
+    val label: String,
+    val minimumAchievement: Double,
+    val maximumAchievement: Double,
+    val isAllPerfect: Boolean,
+)

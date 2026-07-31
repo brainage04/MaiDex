@@ -13,6 +13,7 @@ class UnlockAndDxScoreTest {
         assertEquals("Chiho unlock", info.label)
         assertTrue(info.summary.contains("525 km"))
         assertTrue(info.details.contains("not the area's Perfect Challenge track"))
+        assertEquals("chiho-ongeki-9", info.guideEntryId)
     }
 
     @Test
@@ -23,12 +24,34 @@ class UnlockAndDxScoreTest {
         assertTrue(info.details.contains("SSS5+"))
         assertTrue(info.details.contains("SS5+"))
         assertTrue(info.details.contains("available by default from CiRCLE PLUS"))
+        assertEquals("class-circle", info.guideEntryId)
     }
 
     @Test
     fun `songs without curated unlock requirements remain unmarked`() {
         assertTrue(UnlockMetadata.forSong("PANDORA PARADOXXX").isEmpty())
         assertFalse(UnlockMetadata.forSong("Sky Trails").isEmpty())
+    }
+
+    @Test
+    fun `unlock guide exposes separate Chiho and class battle lists`() {
+        val chihos = UnlockMetadata.guideEntries.filter { it.section == UnlockGuideSection.CHIHOS }
+        val classBattles = UnlockMetadata.guideEntries.filter { it.section == UnlockGuideSection.CLASS_BATTLES }
+
+        assertEquals(9, chihos.size)
+        assertTrue(chihos.any { entry -> entry.songs.any { it.title == "Daredevil Glaive" } })
+        assertEquals(12, classBattles.size)
+        assertTrue(classBattles.any { entry -> entry.songs.any { it.title == "7 Wonders" } })
+    }
+
+    @Test
+    fun `every curated unlock card links to a real guide entry`() {
+        UnlockMetadata.guideEntries
+            .flatMap { it.songs }
+            .forEach { song ->
+                val info = UnlockMetadata.forSong(song.title).single()
+                assertEquals(info.guideEntryId, UnlockMetadata.guideEntry(info.guideEntryId.orEmpty())?.id)
+            }
     }
 
     @Test

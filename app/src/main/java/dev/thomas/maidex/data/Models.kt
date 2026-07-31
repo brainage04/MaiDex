@@ -25,11 +25,32 @@ data class Regions(
         if (china) add("cn")
     }
 }
+enum class UnlockGuideSection(val label: String) {
+    CHIHOS("Chihos"),
+    CLASS_BATTLES("Class battles"),
+}
+
+data class UnlockGuideSong(
+    val title: String,
+    val requirement: String = "",
+)
+
+data class UnlockGuideEntry(
+    val id: String,
+    val section: UnlockGuideSection,
+    val title: String,
+    val subtitle: String,
+    val details: String,
+    val songs: List<UnlockGuideSong>,
+    val sourceUrl: String,
+)
+
 data class SongUnlockInfo(
     val label: String,
     val summary: String,
     val details: String,
     val sourceUrl: String,
+    val guideEntryId: String? = null,
 )
 
 

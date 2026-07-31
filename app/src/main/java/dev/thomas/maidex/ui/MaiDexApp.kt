@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -100,6 +101,9 @@ import dev.thomas.maidex.data.ComboMedal
 import dev.thomas.maidex.data.FilterOptions
 import dev.thomas.maidex.data.SongChart
 import dev.thomas.maidex.data.SongUnlockInfo
+import dev.thomas.maidex.data.UnlockGuideEntry
+import dev.thomas.maidex.data.UnlockGuideSection
+import dev.thomas.maidex.data.UnlockMetadata
 import dev.thomas.maidex.data.ConstantAvailability
 import dev.thomas.maidex.data.Grade
 import dev.thomas.maidex.data.JudgeCounts
@@ -120,6 +124,8 @@ fun MaiDexApp(viewModel: MainViewModel) {
     var selectedChart by remember { mutableStateOf<SongChart?>(null) }
     var showAbout by remember { mutableStateOf(false) }
     var showAccount by remember { mutableStateOf(false) }
+    var showUnlockGuide by remember { mutableStateOf(false) }
+    var selectedUnlockGuideEntryId by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -142,6 +148,12 @@ fun MaiDexApp(viewModel: MainViewModel) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        selectedUnlockGuideEntryId = null
+                        showUnlockGuide = true
+                    }) {
+                        Icon(Icons.Default.Map, contentDescription = "Chiho and class battle guides")
+                    }
                     IconButton(onClick = { showAccount = true }) {
                         Icon(Icons.Default.AccountCircle, contentDescription = "DX NET account")
                     }
@@ -200,6 +212,10 @@ fun MaiDexApp(viewModel: MainViewModel) {
                 onToggleUtage = viewModel::toggleUtageVisibility,
                 onClearFilters = viewModel::clearFilters,
                 onChart = { selectedChart = it },
+                onUnlockGuide = { entryId ->
+                    selectedUnlockGuideEntryId = entryId
+                    showUnlockGuide = true
+                },
             )
         }
     }
@@ -223,6 +239,11 @@ fun MaiDexApp(viewModel: MainViewModel) {
             playDetail = state.playDetails[chart.chartKey],
             state = state,
             onDismiss = { selectedChart = null },
+            onOpenGuide = { entryId ->
+                selectedChart = null
+                selectedUnlockGuideEntryId = entryId
+                showUnlockGuide = true
+            },
         )
     }
     if (showAccount) {
@@ -233,6 +254,15 @@ fun MaiDexApp(viewModel: MainViewModel) {
             onClear = viewModel::clearAccount,
             onDismissStatus = viewModel::dismissImportStatus,
             onDismiss = { showAccount = false },
+        )
+    }
+    if (showUnlockGuide) {
+        UnlockGuideDialog(
+            initialEntryId = selectedUnlockGuideEntryId,
+            onDismiss = {
+                showUnlockGuide = false
+                selectedUnlockGuideEntryId = null
+            },
         )
     }
     if (showAbout) {
@@ -262,6 +292,7 @@ private fun CatalogContent(
     onToggleUtage: () -> Unit,
     onClearFilters: () -> Unit,
     onChart: (SongChart) -> Unit,
+    onUnlockGuide: (String) -> Unit,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -352,7 +383,7 @@ private fun CatalogContent(
                         chart = chart,
                         score = state.scores[chart.chartKey],
                         onClick = { onChart(chart) },
-
+                        onUnlockGuide = onUnlockGuide,
                     )
                 }
             }
@@ -424,7 +455,12 @@ private fun ConstantAvailabilityMenu(
     }
 }
 @Composable
-private fun ChartCard(chart: SongChart, score: UserScore?, onClick: () -> Unit) {
+private fun ChartCard(
+    chart: SongChart,
+    score: UserScore?,
+    onClick: () -> Unit,
+    onUnlockGuide: (String) -> Unit,
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -501,7 +537,14 @@ private fun ChartCard(chart: SongChart, score: UserScore?, onClick: () -> Unit) 
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                chart.unlockInfo.forEach { UnlockTileInfo(it) }
+                chart.unlockInfo.forEach { info ->
+                    UnlockTileInfo(
+                        info = info,
+                        onOpenGuide = info.guideEntryId?.let { entryId ->
+                            { onUnlockGuide(entryId) }
+                        },
+                    )
+                }
                 if (score != null) {
                     HorizontalDivider(Modifier.padding(vertical = 7.dp))
                     Row(
@@ -535,10 +578,15 @@ private fun ChartCard(chart: SongChart, score: UserScore?, onClick: () -> Unit) 
     }
 }
 @Composable
-private fun UnlockTileInfo(info: SongUnlockInfo) {
+private fun UnlockTileInfo(
+    info: SongUnlockInfo,
+    onOpenGuide: (() -> Unit)?,
+) {
     Spacer(Modifier.height(6.dp))
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onOpenGuide != null) Modifier.clickable(onClick = onOpenGuide) else Modifier),
         color = MaterialTheme.colorScheme.tertiaryContainer,
         shape = RoundedCornerShape(8.dp),
     ) {
@@ -556,6 +604,14 @@ private fun UnlockTileInfo(info: SongUnlockInfo) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (onOpenGuide != null) {
+                Text(
+                    "View in unlock guides ›",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
         }
     }
 }
@@ -563,6 +619,7 @@ private fun UnlockTileInfo(info: SongUnlockInfo) {
 @Composable
 private fun UnlockDetailInfo(
     info: SongUnlockInfo,
+    onOpenGuide: (() -> Unit)?,
     onOpenSource: () -> Unit,
 ) {
     Spacer(Modifier.height(12.dp))
@@ -590,13 +647,17 @@ private fun UnlockDetailInfo(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
             )
-            TextButton(
-                onClick = onOpenSource,
-                modifier = Modifier.align(Alignment.End),
-            ) {
-                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("Unlock source")
+            Row(modifier = Modifier.align(Alignment.End)) {
+                if (onOpenGuide != null) {
+                    TextButton(onClick = onOpenGuide) {
+                        Text("Open guide entry")
+                    }
+                }
+                TextButton(onClick = onOpenSource) {
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Source")
+                }
             }
         }
     }
@@ -641,6 +702,139 @@ private fun MedalPill(label: String, color: Color) {
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Black,
         )
+    }
+}
+
+@Composable
+private fun UnlockGuideDialog(
+    initialEntryId: String?,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val initialEntry = remember(initialEntryId) {
+        initialEntryId?.let(UnlockMetadata::guideEntry)
+    }
+    var section by remember(initialEntryId) {
+        mutableStateOf(initialEntry?.section ?: UnlockGuideSection.CHIHOS)
+    }
+    val entries = UnlockMetadata.guideEntries.filter { it.section == section }
+    val orderedEntries = if (initialEntry?.section == section) {
+        listOf(initialEntry) + entries.filterNot { it.id == initialEntry.id }
+    } else {
+        entries
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.94f),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Unlock guides", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(
+                            "International Chihos and Friend Matching Gift Songs",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = onDismiss) { Text("Close") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    UnlockGuideSection.entries.forEach { option ->
+                        FilterChip(
+                            selected = section == option,
+                            onClick = { section = option },
+                            label = { Text(option.label) },
+                        )
+                    }
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(orderedEntries, key = UnlockGuideEntry::id) { entry ->
+                        UnlockGuideEntryCard(
+                            entry = entry,
+                            isLinkedEntry = entry.id == initialEntryId,
+                            onOpenSource = {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(entry.sourceUrl)))
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UnlockGuideEntryCard(
+    entry: UnlockGuideEntry,
+    isLinkedEntry: Boolean,
+    onOpenSource: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = if (isLinkedEntry) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        shape = RoundedCornerShape(14.dp),
+        border = if (isLinkedEntry) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            if (isLinkedEntry) {
+                Text(
+                    "Linked entry",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Text(entry.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                entry.subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(5.dp))
+            Text(entry.details, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(6.dp))
+            entry.songs.forEach { song ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("• ${song.title}", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    if (song.requirement.isNotBlank()) {
+                        Text(
+                            song.requirement,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            TextButton(onClick = onOpenSource, modifier = Modifier.align(Alignment.End)) {
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Source")
+            }
+        }
     }
 }
 
@@ -1022,6 +1216,7 @@ private fun ChartDetailDialog(
     score: UserScore?,
     playDetail: PlayDetail?,
     state: CatalogUiState,
+    onOpenGuide: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1067,6 +1262,9 @@ private fun ChartDetailDialog(
                 chart.unlockInfo.forEach { info ->
                     UnlockDetailInfo(
                         info = info,
+                        onOpenGuide = info.guideEntryId?.let { entryId ->
+                            { onOpenGuide(entryId) }
+                        },
                         onOpenSource = {
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.sourceUrl)))
                         },
@@ -1170,26 +1368,24 @@ private fun ScoreSection(
         dxScoreText(score) + if (score.dxStarCount > 0) "  ${"★".repeat(score.dxStarCount)}" else "",
     )
     DetailRow("Chart rating", RatingCalculator.chartRating(chart, score)?.toString() ?: "Unknown constant")
-    DetailRow(
-        "Total rating",
-        "${state.calculatedRating} calculated" +
-            (state.profile?.officialRating?.let { "  ·  $it official" } ?: ""),
-    )
 
-    val milestones = remember(chart.chartKey, score, state.scores) {
+    val bestBreakJudgments = playDetail?.judgments?.breakNotes
+    val milestones = remember(chart.chartKey, score, state.scores, bestBreakJudgments) {
         RatingCalculator.milestones(
             chart = chart,
             score = score,
             charts = state.allCharts,
             scores = state.scores,
             newVersions = state.newVersions,
+            breakJudgments = bestBreakJudgments,
         )
     }
     if (milestones.isNotEmpty() && chart.constant != null) {
         Spacer(Modifier.height(12.dp))
         Text("Next rating milestones", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Text(
-            "AP and AP+ receive the current CiRCLE-era +1 rating bonus. Achievement is capped at 100.5%.",
+            "AP keeps the Critical Perfect/Perfect Break split from the imported detailed play. " +
+                "The range covers every Perfect Break being in the near or far timing window.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1201,20 +1397,22 @@ private fun ScoreSection(
             ) {
                 Row(Modifier.fillMaxWidth()) {
                     Text(milestone.label, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                    Text(String.format(Locale.US, "%.4f%%", milestone.achievement))
+                    Text(achievementRangeText(milestone.minimumAchievement, milestone.maximumAchievement))
                 }
                 Row(Modifier.fillMaxWidth()) {
                     Text(
-                        "Chart Rt ${milestone.chartRating ?: "—"}",
+                        "Chart Rt " + integerRangeText(
+                            milestone.minimumChartRating,
+                            milestone.maximumChartRating,
+                        ),
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
-                        if (milestone.totalChange >= 0) {
-                            "+${milestone.totalChange} total rating"
-                        } else {
-                            "${milestone.totalChange} total rating"
-                        },
+                        signedRatingRangeText(
+                            milestone.minimumTotalChange,
+                            milestone.maximumTotalChange,
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -1235,9 +1433,33 @@ private fun ScoreSection(
     }
 }
 
+private fun achievementRangeText(minimum: Double, maximum: Double): String =
+    if (kotlin.math.abs(maximum - minimum) < 0.00005) {
+        String.format(Locale.US, "%.4f%%", minimum)
+    } else {
+        String.format(Locale.US, "%.4f–%.4f%%", minimum, maximum)
+    }
+
+private fun integerRangeText(minimum: Int?, maximum: Int?): String = when {
+    minimum == null || maximum == null -> "—"
+    minimum == maximum -> minimum.toString()
+    else -> "$minimum–$maximum"
+}
+
+private fun signedRatingRangeText(minimum: Int, maximum: Int): String {
+    fun signed(value: Int) = if (value >= 0) "+$value" else value.toString()
+    return if (minimum == maximum) {
+        "${signed(minimum)} total rating"
+    } else {
+        "${signed(minimum)}–${signed(maximum)} total rating"
+    }
+}
+
 @Composable
 private fun JudgmentDetail(chart: SongChart, detail: PlayDetail) {
-    var showLossTable by remember { mutableStateOf(false) }
+    val losses = AchievementLossCalculator
+        .groupedJudgmentLosses(chart.noteCounts, detail.judgments, detail.achievement)
+        .associateBy { it.noteType }
     Spacer(Modifier.height(14.dp))
     Text("Latest detailed play", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
     Text(
@@ -1253,67 +1475,46 @@ private fun JudgmentDetail(chart: SongChart, detail: PlayDetail) {
             .horizontalScroll(rememberScrollState()),
     ) {
         Row(Modifier.padding(vertical = 5.dp)) {
-            TableCell("Note", 62, true)
-            TableCell("CP", 48, true)
-            TableCell("P", 48, true)
-            TableCell("Great", 54, true)
-            TableCell("Good", 50, true)
-            TableCell("Miss", 50, true)
+            TableCell("Note", 38, true)
+            TableCell("CP", 30, true)
+            TableCell("P", 30, true)
+            TableCell("Gr", 62, true)
+            TableCell("Go", 62, true)
+            TableCell("M", 62, true)
         }
-        JudgeRow("Tap", detail.judgments.tap)
-        JudgeRow("Hold", detail.judgments.hold)
-        JudgeRow("Slide", detail.judgments.slide)
-        JudgeRow("Touch", detail.judgments.touch)
-        JudgeRow("Break", detail.judgments.breakNotes)
-    }
-    val loss = AchievementLossCalculator.actualLossRange(chart.noteCounts, detail.judgments)
-    val lossText = if (kotlin.math.abs(loss.maximum - loss.minimum) < 0.0000001) {
-        String.format(Locale.US, "%.6f percentage points", loss.minimum)
-    } else {
-        String.format(Locale.US, "%.6f–%.6f percentage points", loss.minimum, loss.maximum)
-    }
-    DetailRow("Judgement loss", lossText)
-    Text(
-        "A range is shown when DX NET groups near/far Break Perfects or high/mid/low Break Greats together.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    TextButton(onClick = { showLossTable = !showLossTable }) {
-        Text(if (showLossTable) "Hide per-judgement losses" else "Show per-judgement losses")
-    }
-    if (showLossTable) {
-        Text(
-            "Loss from one judgement on this chart. Non-Break Perfect loses 0 achievement but 1 DX score.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        AchievementLossCalculator.perJudgment(chart.noteCounts).forEach { row ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 2.dp),
-            ) {
-                Text(row.noteType, modifier = Modifier.width(52.dp), style = MaterialTheme.typography.labelMedium)
-                Text(row.judgment, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                Text(
-                    String.format(Locale.US, "−%.6f pp", row.achievementLoss),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("DX −${row.dxScoreLoss}", style = MaterialTheme.typography.bodySmall)
-            }
-        }
+        JudgeRow("Tap", detail.judgments.tap, losses["Tap"])
+        JudgeRow("Hold", detail.judgments.hold, losses["Hold"])
+        JudgeRow("Slide", detail.judgments.slide, losses["Slide"])
+        JudgeRow("Touch", detail.judgments.touch, losses["Touch"])
+        JudgeRow("Break", detail.judgments.breakNotes, losses["Break"])
     }
 }
 
 @Composable
-private fun JudgeRow(name: String, counts: JudgeCounts) {
+private fun JudgeRow(
+    name: String,
+    counts: JudgeCounts,
+    losses: dev.thomas.maidex.rating.JudgmentRowLoss?,
+) {
     Row(Modifier.padding(vertical = 3.dp)) {
-        TableCell(name, 62, true)
-        TableCell(counts.criticalPerfect.toString(), 48)
-        TableCell(counts.perfect.toString(), 48)
-        TableCell(counts.great.toString(), 54)
-        TableCell(counts.good.toString(), 50)
-        TableCell(counts.miss.toString(), 50)
+        TableCell(name, 38, true)
+        TableCell(counts.criticalPerfect.toString(), 30)
+        TableCell(counts.perfect.toString(), 30)
+        TableCell(judgmentCountText(counts.great, losses?.great), 62)
+        TableCell(judgmentCountText(counts.good, losses?.good), 62)
+        TableCell(judgmentCountText(counts.miss, losses?.miss), 62)
+    }
+}
+
+private fun judgmentCountText(
+    count: Int,
+    loss: dev.thomas.maidex.rating.LossRange?,
+): String {
+    if (count == 0 || loss == null) return count.toString()
+    return if (kotlin.math.abs(loss.maximum - loss.minimum) < 0.00005) {
+        String.format(Locale.US, "%d%n(-%.2f%%)", count, loss.minimum)
+    } else {
+        String.format(Locale.US, "%d%n(-%.2f–%.2f%%)", count, loss.minimum, loss.maximum)
     }
 }
 
@@ -1322,7 +1523,7 @@ private fun TableCell(value: String, width: Int, bold: Boolean = false) {
     Text(
         value,
         modifier = Modifier.width(width.dp),
-        style = MaterialTheme.typography.bodySmall,
+        style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
         fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
     )
 }

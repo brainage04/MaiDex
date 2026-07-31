@@ -3,56 +3,174 @@ package dev.thomas.maidex.data
 internal object UnlockMetadata {
     private const val CIRCLE_ASIA_SOURCE = "https://silentblue.remywiki.com/maimai_DX:CiRCLE_(Asia)"
     private const val PERFECT_CHALLENGE_SOURCE = "https://silentblue.remywiki.com/maimai_DX:Perfect_Challenge"
+    private const val FRIEND_MATCHING_SOURCE = "https://silentblue.remywiki.com/maimai_DX:Friend_Matching"
     private const val DAREDEVIL_SOURCE = "https://silentblue.remywiki.com/Daredevil_Glaive"
     private const val SEVEN_WONDERS_SOURCE = "https://silentblue.remywiki.com/7_Wonders"
 
-    private data class AreaGroup(val name: String, val songs: List<String>)
+    private data class AreaGroup(
+        val id: String,
+        val name: String,
+        val songs: List<UnlockGuideSong>,
+    )
+
+    private data class ClassBattleGroup(
+        val id: String,
+        val version: String,
+        val songs: List<UnlockGuideSong>,
+    )
 
     private val areaGroups = listOf(
-        AreaGroup("Paradigm: Reboot Chiho", listOf("零號車輛")),
-        AreaGroup("Tricoro Chiho", listOf("Magical Paradox", "殿ッ！？ご乱心！？")),
-        AreaGroup("FEAT CONTEST Chiho", listOf("拝啓、最高の思い出たち", "おべんきょうたいむ", "るろうらんる")),
-        AreaGroup("kawaii Chiho 2", listOf("真空都市", "Eternal Return", "ぱぱぱらビーチ", "Get U ♭ack")),
-        AreaGroup("cosMo@Bousou-P Chiho 2", listOf("ラストピースに祝福と栄光を")),
-        AreaGroup("Takamagahara Chiho 2", listOf("ミクマリ", "雲外蒼電 -Dreaming Voltage-", "鬼女紅妖", "華天月兎")),
-        AreaGroup("Sky Street Chiho 7", listOf("スローグロー", "ECHO,", "Phase: Theatre", "Sky Trails")),
-        AreaGroup("ONGEKI Area 9", listOf("ICEBURN", "Daredevil Glaive")),
+        AreaGroup("chiho-paradigm-reboot", "Paradigm: Reboot Chiho", songs("零號車輛")),
+        AreaGroup("chiho-tricoro", "Tricoro Chiho", songs("Magical Paradox", "殿ッ！？ご乱心！？")),
+        AreaGroup(
+            "chiho-feat-contest",
+            "FEAT CONTEST Chiho",
+            songs("拝啓、最高の思い出たち", "おべんきょうたいむ", "るろうらんる"),
+        ),
+        AreaGroup(
+            "chiho-kawaii-2",
+            "kawaii Chiho 2",
+            songs("真空都市", "Eternal Return", "ぱぱぱらビーチ", "Get U ♭ack"),
+        ),
+        AreaGroup("chiho-cosmo-2", "cosMo@Bousou-P Chiho 2", songs("ラストピースに祝福と栄光を")),
+        AreaGroup(
+            "chiho-takamagahara-2",
+            "Takamagahara Chiho 2",
+            songs("ミクマリ", "雲外蒼電 -Dreaming Voltage-", "鬼女紅妖", "華天月兎"),
+        ),
+        AreaGroup(
+            "chiho-sky-street-7",
+            "Sky Street Chiho 7",
+            songs("スローグロー", "ECHO,", "Phase: Theatre", "Sky Trails"),
+        ),
+        AreaGroup(
+            "chiho-ongeki-9",
+            "ONGEKI Area 9",
+            listOf(
+                UnlockGuideSong("ICEBURN", "Progress through the area"),
+                UnlockGuideSong("Daredevil Glaive", "Reach 525 km"),
+            ),
+        ),
+        AreaGroup(
+            "chiho-tricoro-2",
+            "Tricoro Chiho 2",
+            listOf(UnlockGuideSong("ソテリア", "Final-track Perfect Challenge")),
+        ),
     )
+
+    private val classBattleGroups = listOf(
+        ClassBattleGroup(
+            "class-circle-plus",
+            "CiRCLE PLUS",
+            listOf(UnlockGuideSong("Break The Speakers", "Japan")),
+        ),
+        ClassBattleGroup(
+            "class-circle",
+            "CiRCLE",
+            listOf(
+                UnlockGuideSong("Customized Justice", "Japan"),
+                UnlockGuideSong("7 Wonders", "International"),
+            ),
+        ),
+        ClassBattleGroup("class-prism-plus", "PRiSM PLUS", songs("ATLAS RUSH")),
+        ClassBattleGroup("class-prism", "PRiSM", songs("Cryptarithm")),
+        ClassBattleGroup("class-buddies-plus", "BUDDiES PLUS", songs("IF:U")),
+        ClassBattleGroup("class-buddies", "BUDDiES", songs("Latent Kingdom")),
+        ClassBattleGroup("class-festival-plus", "FESTiVAL PLUS", songs("VeRForTe αRtE:VEiN")),
+        ClassBattleGroup("class-festival", "FESTiVAL", songs("mystique as iris")),
+        ClassBattleGroup("class-universe-plus", "UNiVERSE PLUS", songs("sølips")),
+        ClassBattleGroup("class-universe", "UNiVERSE", songs("Lia=Fail")),
+        ClassBattleGroup("class-splash-plus", "Splash PLUS", songs("Heavenly Blast")),
+        ClassBattleGroup(
+            "class-splash",
+            "Splash",
+            listOf(
+                UnlockGuideSong("BATTLE NO.1", "Japan"),
+                UnlockGuideSong("≠彡\"/了→", "International"),
+            ),
+        ),
+    )
+
+    val guideEntries: List<UnlockGuideEntry> =
+        areaGroups.map { area ->
+            UnlockGuideEntry(
+                id = area.id,
+                section = UnlockGuideSection.CHIHOS,
+                title = area.name,
+                subtitle = "${area.songs.size} unlock ${if (area.songs.size == 1) "song" else "songs"}",
+                details = "International area progression. Final tracks may use a life-mode Perfect Challenge whose Life allowance relaxes over time.",
+                songs = area.songs,
+                sourceUrl = CIRCLE_ASIA_SOURCE,
+            )
+        } + classBattleGroups.map { battle ->
+            UnlockGuideEntry(
+                id = battle.id,
+                section = UnlockGuideSection.CLASS_BATTLES,
+                title = battle.version,
+                subtitle = "Conduction / Gift ${if (battle.songs.size == 1) "Song" else "Songs"}",
+                details = "Defeat the final Friend Matching class boss and reach LEGEND, or play with a LEGEND-class conductor. A previous version's Gift Song becomes available by default after the next version update.",
+                songs = battle.songs,
+                sourceUrl = FRIEND_MATCHING_SOURCE,
+            )
+        }
 
     private val bySourceSongId: Map<String, List<SongUnlockInfo>> = buildMap {
         areaGroups.forEach { area ->
             val info = SongUnlockInfo(
                 label = "Chiho unlock",
                 summary = area.name,
-                details = "International CiRCLE: progress through ${area.name} to unlock this song for regular play.",
+                details = "International: progress through ${area.name} to unlock this song for regular play.",
                 sourceUrl = CIRCLE_ASIA_SOURCE,
+                guideEntryId = area.id,
             )
-            area.songs.forEach { put(it, listOf(info)) }
+            area.songs.forEach { put(it.title, listOf(info)) }
+        }
+        classBattleGroups.forEach { battle ->
+            battle.songs.forEach { song ->
+                put(
+                    song.title,
+                    listOf(
+                        SongUnlockInfo(
+                            label = "Class battle unlock",
+                            summary = "${battle.version} Gift Song" +
+                                song.requirement.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty(),
+                            details = "Defeat the final Friend Matching class boss and reach LEGEND, or receive the song from a LEGEND-class conductor. Previous-version Gift Songs become available by default after a version update.",
+                            sourceUrl = FRIEND_MATCHING_SOURCE,
+                            guideEntryId = battle.id,
+                        ),
+                    ),
+                )
+            }
         }
 
         perfectChallenge(
             song = "殿ッ！？ご乱心！？",
             area = "Tricoro Chiho",
+            guideEntryId = "chiho-tricoro",
             internationalDate = "2026-01-22",
         )
         perfectChallenge(
             song = "るろうらんる",
             area = "FEAT CONTEST Chiho",
+            guideEntryId = "chiho-feat-contest",
             internationalDate = "2026-02-13",
         )
         perfectChallenge(
             song = "Get U ♭ack",
             area = "kawaii Chiho 2",
+            guideEntryId = "chiho-kawaii-2",
             internationalDate = "2026-03-19",
         )
         perfectChallenge(
             song = "華天月兎",
             area = "Takamagahara Chiho 2",
+            guideEntryId = "chiho-takamagahara-2",
             internationalDate = "2026-05-01",
         )
         perfectChallenge(
             song = "Sky Trails",
             area = "Sky Street Chiho 7",
+            guideEntryId = "chiho-sky-street-7",
             internationalDate = "2026-06-12",
         )
         put(
@@ -63,10 +181,10 @@ internal object UnlockMetadata {
                     summary = "Tricoro Chiho 2 final track",
                     details = "International CiRCLE PLUS: available from 2026-07-23. Clear the life-mode Perfect Challenge to unlock regular play. Each non-Perfect judgement costs 1 Life; the allowance relaxes over time.",
                     sourceUrl = PERFECT_CHALLENGE_SOURCE,
+                    guideEntryId = "chiho-tricoro-2",
                 ),
             ),
         )
-
         put(
             "Daredevil Glaive",
             listOf(
@@ -75,6 +193,7 @@ internal object UnlockMetadata {
                     summary = "ONGEKI Area 9 · 525 km",
                     details = "International CiRCLE: available from 2026-07-10. Reach a total distance of 525 km in ONGEKI Area 9 to unlock it permanently. Daredevil Glaive is not the area's Perfect Challenge track.",
                     sourceUrl = DAREDEVIL_SOURCE,
+                    guideEntryId = "chiho-ongeki-9",
                 ),
             ),
         )
@@ -86,6 +205,7 @@ internal object UnlockMetadata {
                     summary = "Friend Matching · now available by default",
                     details = "International history: initially unlocked by defeating the SSS1 boss friend and reaching LEGEND, or by playing with a LEGEND-class conductor. From 2026-04-24 it became an SSS5+ special boss requiring rank SSS; from 2026-05-29 the class requirement dropped to SS5+. It is available by default from CiRCLE PLUS.",
                     sourceUrl = SEVEN_WONDERS_SOURCE,
+                    guideEntryId = "class-circle",
                 ),
             ),
         )
@@ -93,9 +213,12 @@ internal object UnlockMetadata {
 
     fun forSong(sourceSongId: String): List<SongUnlockInfo> = bySourceSongId[sourceSongId].orEmpty()
 
+    fun guideEntry(id: String): UnlockGuideEntry? = guideEntries.firstOrNull { it.id == id }
+
     private fun MutableMap<String, List<SongUnlockInfo>>.perfectChallenge(
         song: String,
         area: String,
+        guideEntryId: String,
         internationalDate: String,
     ) {
         put(
@@ -106,8 +229,12 @@ internal object UnlockMetadata {
                     summary = "$area final track",
                     details = "International CiRCLE: available from $internationalDate. Clear the life-mode Perfect Challenge to unlock regular play. Each non-Perfect judgement costs 1 Life; the allowance relaxes over time.",
                     sourceUrl = PERFECT_CHALLENGE_SOURCE,
+                    guideEntryId = guideEntryId,
                 ),
             ),
         )
     }
+
+    private fun songs(vararg titles: String): List<UnlockGuideSong> =
+        titles.map(::UnlockGuideSong)
 }

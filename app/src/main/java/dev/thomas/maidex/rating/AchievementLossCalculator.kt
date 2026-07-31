@@ -52,6 +52,102 @@ object AchievementLossCalculator {
         )
     }
 
+    fun groupedJudgmentLosses(
+        noteCounts: NoteCounts,
+        judgments: JudgmentTable,
+        achievement: Double? = null,
+    ): List<JudgmentRowLoss> {
+        val maximumBase = maximumBase(noteCounts)
+        if (maximumBase <= 0.0) return emptyList()
+        val rows = mutableListOf(
+            standardGroupedLoss("Tap", judgments.tap, 500.0, maximumBase),
+            standardGroupedLoss("Hold", judgments.hold, 1_000.0, maximumBase),
+            standardGroupedLoss("Slide", judgments.slide, 1_500.0, maximumBase),
+            standardGroupedLoss("Touch", judgments.touch, 500.0, maximumBase),
+        )
+        val breaks = noteCounts.breakNotes ?: 0
+        if (breaks > 0) {
+            val counts = judgments.breakNotes
+            val greatRange = inferBreakGreatLoss(
+                judgments = judgments,
+                achievement = achievement,
+                maximumBase = maximumBase,
+                breaks = breaks,
+            ) ?: LossRange(
+                minimum = counts.great * breakLossValue(500.0, 60.0, maximumBase, breaks),
+                maximum = counts.great * breakLossValue(1_250.0, 60.0, maximumBase, breaks),
+            )
+            rows += JudgmentRowLoss(
+                noteType = "Break",
+                great = greatRange,
+                good = fixedRange(counts.good * breakLossValue(1_500.0, 70.0, maximumBase, breaks)),
+                miss = fixedRange(counts.miss * breakLossValue(2_500.0, 100.0, maximumBase, breaks)),
+            )
+        }
+        return rows
+    }
+
+    private fun inferBreakGreatLoss(
+        judgments: JudgmentTable,
+        achievement: Double?,
+        maximumBase: Double,
+        breaks: Int,
+    ): LossRange? {
+        achievement ?: return null
+        val counts = judgments.breakNotes
+        if (counts.great == 0) return fixedRange(0.0)
+        val combinations =
+            (counts.perfect + 1L) * (counts.great + 1L) * (counts.great + 2L) / 2L
+        if (combinations > 1_000_000L) return null
+
+        val knownLoss =
+            standardActual(judgments.tap, 500.0, maximumBase) +
+                standardActual(judgments.hold, 1_000.0, maximumBase) +
+                standardActual(judgments.slide, 1_500.0, maximumBase) +
+                standardActual(judgments.touch, 500.0, maximumBase) +
+                counts.good * breakLossValue(1_500.0, 70.0, maximumBase, breaks) +
+                counts.miss * breakLossValue(2_500.0, 100.0, maximumBase, breaks)
+        val unknownLoss = 101.0 - achievement - knownLoss
+        val nearPerfect = breakLossValue(0.0, 25.0, maximumBase, breaks)
+        val farPerfect = breakLossValue(0.0, 50.0, maximumBase, breaks)
+        val highGreat = breakLossValue(500.0, 60.0, maximumBase, breaks)
+        val midGreat = breakLossValue(1_000.0, 60.0, maximumBase, breaks)
+        val lowGreat = breakLossValue(1_250.0, 60.0, maximumBase, breaks)
+        var minimum = Double.POSITIVE_INFINITY
+        var maximum = Double.NEGATIVE_INFINITY
+
+        for (farPerfectCount in 0..counts.perfect) {
+            val perfectLoss =
+                farPerfectCount * farPerfect + (counts.perfect - farPerfectCount) * nearPerfect
+            for (midGreatCount in 0..counts.great) {
+                for (lowGreatCount in 0..(counts.great - midGreatCount)) {
+                    val highGreatCount = counts.great - midGreatCount - lowGreatCount
+                    val greatLoss =
+                        highGreatCount * highGreat + midGreatCount * midGreat + lowGreatCount * lowGreat
+                    if (kotlin.math.abs(perfectLoss + greatLoss - unknownLoss) <= 0.000051) {
+                        minimum = minOf(minimum, greatLoss)
+                        maximum = maxOf(maximum, greatLoss)
+                    }
+                }
+            }
+        }
+        return if (minimum.isFinite()) LossRange(minimum, maximum) else null
+    }
+
+    private fun standardGroupedLoss(
+        noteType: String,
+        judgments: JudgeCounts,
+        weight: Double,
+        maximumBase: Double,
+    ): JudgmentRowLoss = JudgmentRowLoss(
+        noteType = noteType,
+        great = fixedRange(judgments.great * weight * 0.2 / maximumBase * 100.0),
+        good = fixedRange(judgments.good * weight * 0.5 / maximumBase * 100.0),
+        miss = fixedRange(judgments.miss * weight / maximumBase * 100.0),
+    )
+
+    private fun fixedRange(value: Double) = LossRange(value, value)
+
     private fun addStandardRows(
         rows: MutableList<JudgmentLoss>,
         noteType: String,
@@ -102,6 +198,13 @@ data class JudgmentLoss(
     val judgment: String,
     val achievementLoss: Double,
     val dxScoreLoss: Int,
+)
+
+data class JudgmentRowLoss(
+    val noteType: String,
+    val great: LossRange,
+    val good: LossRange,
+    val miss: LossRange,
 )
 
 data class LossRange(val minimum: Double, val maximum: Double)
