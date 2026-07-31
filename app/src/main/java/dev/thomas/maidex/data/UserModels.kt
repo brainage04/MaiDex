@@ -59,7 +59,23 @@ data class UserScore(
     val dxScore: Int,
     val maxDxScore: Int,
     val importedAt: Long = Instant.now().toEpochMilli(),
-)
+) {
+    val dxScorePercentage: Double?
+        get() = maxDxScore.takeIf { it > 0 }?.let { dxScore.toDouble() / it * 100.0 }
+
+    val dxStarCount: Int
+        get() {
+            val percentage = dxScorePercentage ?: return 0
+            return when (percentage) {
+                in 97.0..Double.POSITIVE_INFINITY -> 5
+                in 95.0..<97.0 -> 4
+                in 93.0..<95.0 -> 3
+                in 90.0..<93.0 -> 2
+                in 85.0..<90.0 -> 1
+                else -> 0
+            }
+        }
+}
 
 data class JudgeCounts(
     val criticalPerfect: Int = 0,

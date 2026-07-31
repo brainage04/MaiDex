@@ -25,6 +25,13 @@ data class Regions(
         if (china) add("cn")
     }
 }
+data class SongUnlockInfo(
+    val label: String,
+    val summary: String,
+    val details: String,
+    val sourceUrl: String,
+)
+
 
 data class SongChart(
     val id: Long,
@@ -52,6 +59,7 @@ data class SongChart(
     val regions: Regions,
     val chartVersion: String?,
     val isSpecial: Boolean,
+    val unlockInfo: List<SongUnlockInfo> = emptyList(),
 ) {
     val searchableText: String = normalizeSearch(
         listOf(

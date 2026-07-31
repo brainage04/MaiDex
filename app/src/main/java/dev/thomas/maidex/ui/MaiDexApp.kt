@@ -99,6 +99,7 @@ import dev.thomas.maidex.data.ChartSort
 import dev.thomas.maidex.data.ComboMedal
 import dev.thomas.maidex.data.FilterOptions
 import dev.thomas.maidex.data.SongChart
+import dev.thomas.maidex.data.SongUnlockInfo
 import dev.thomas.maidex.data.ConstantAvailability
 import dev.thomas.maidex.data.Grade
 import dev.thomas.maidex.data.JudgeCounts
@@ -500,6 +501,7 @@ private fun ChartCard(chart: SongChart, score: UserScore?, onClick: () -> Unit) 
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                chart.unlockInfo.forEach { UnlockTileInfo(it) }
                 if (score != null) {
                     HorizontalDivider(Modifier.padding(vertical = 7.dp))
                     Row(
@@ -526,11 +528,110 @@ private fun ChartCard(chart: SongChart, score: UserScore?, onClick: () -> Unit) 
                             MedalPill(score.syncMedal.label, Color(0xFFD4E8FF))
                         }
                     }
+                    DxScoreLine(score)
                 }
             }
         }
     }
 }
+@Composable
+private fun UnlockTileInfo(info: SongUnlockInfo) {
+    Spacer(Modifier.height(6.dp))
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
+            Text(
+                info.label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+            Text(
+                info.summary,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun UnlockDetailInfo(
+    info: SongUnlockInfo,
+    onOpenSource: () -> Unit,
+) {
+    Spacer(Modifier.height(12.dp))
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(
+                info.label,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+            Text(
+                info.summary,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                info.details,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+            TextButton(
+                onClick = onOpenSource,
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Unlock source")
+            }
+        }
+    }
+}
+
+@Composable
+private fun DxScoreLine(score: UserScore) {
+    Row(
+        modifier = Modifier.padding(top = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "DX ${dxScoreText(score)}",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (score.dxStarCount > 0) {
+            Text(
+                "★".repeat(score.dxStarCount),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Black,
+                color = Color(0xFFF5A000),
+            )
+        }
+    }
+}
+
+private fun dxScoreText(score: UserScore): String {
+    val percentage = score.dxScorePercentage
+        ?: return "${score.dxScore}/${score.maxDxScore}"
+    return "${score.dxScore}/${score.maxDxScore} (${String.format(Locale.US, "%.2f", percentage)}%)"
+}
+
 @Composable
 private fun MedalPill(label: String, color: Color) {
     Surface(color = color, shape = RoundedCornerShape(7.dp)) {
@@ -963,6 +1064,14 @@ private fun ChartDetailDialog(
                     listOfNotNull(chart.releaseDate, chart.songVersion.takeIf(String::isNotBlank))
                         .joinToString("  ·  "),
                 )
+                chart.unlockInfo.forEach { info ->
+                    UnlockDetailInfo(
+                        info = info,
+                        onOpenSource = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.sourceUrl)))
+                        },
+                    )
+                }
                 HorizontalDivider(Modifier.padding(vertical = 12.dp))
                 Text("Chart", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Row(
@@ -1056,7 +1165,10 @@ private fun ScoreSection(
         if (score.comboMedal != ComboMedal.NONE) MedalPill(score.comboMedal.label, Color(0xFFFFD9E4))
         if (score.syncMedal != SyncMedal.NONE) MedalPill(score.syncMedal.label, Color(0xFFD4E8FF))
     }
-    DetailRow("DX score", "${score.dxScore} / ${score.maxDxScore}")
+    DetailRow(
+        "DX score",
+        dxScoreText(score) + if (score.dxStarCount > 0) "  ${"★".repeat(score.dxStarCount)}" else "",
+    )
     DetailRow("Chart rating", RatingCalculator.chartRating(chart, score)?.toString() ?: "Unknown constant")
     DetailRow(
         "Total rating",

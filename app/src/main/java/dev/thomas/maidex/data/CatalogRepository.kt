@@ -93,6 +93,7 @@ class CatalogRepository(private val context: Context) {
         ),
         chartVersion = nullableString(31),
         isSpecial = getInt(32) == 1,
+        unlockInfo = UnlockMetadata.forSong(getString(2)),
     )
 
     private fun loadOptions(database: SQLiteDatabase): FilterOptions = FilterOptions(
