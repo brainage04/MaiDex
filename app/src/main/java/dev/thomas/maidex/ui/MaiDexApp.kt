@@ -1555,23 +1555,30 @@ private fun NoteCountTable(chart: SongChart) {
         "Total" to counts.total,
     )
     Text("Note counts", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        values.forEach { (name, count) ->
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
+        repeat(2) { rowIndex ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(name, style = MaterialTheme.typography.labelSmall)
-                    Text(count?.toString() ?: "—", fontWeight = FontWeight.Bold)
+                repeat(3) { columnIndex ->
+                    val (name, count) = values[rowIndex * 3 + columnIndex]
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(name, style = MaterialTheme.typography.labelSmall)
+                            Text(count?.toString() ?: "—", fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
