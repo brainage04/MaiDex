@@ -3,10 +3,12 @@ package dev.thomas.maidex.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -39,7 +41,6 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MilitaryTech
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -81,7 +82,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
@@ -91,6 +94,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import dev.thomas.maidex.DxNetLoginActivity
@@ -1363,12 +1367,15 @@ private fun AccountDialog(
     val context = LocalContext.current
     val isImporting = importStatus is ImportStatus.Running
 
-    Dialog(onDismissRequest = {
-        onDismissStatus()
-        onDismiss()
-    }) {
+    Dialog(
+        onDismissRequest = {
+            onDismissStatus()
+            onDismiss()
+        },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(0.88f),
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
         ) {
@@ -1533,156 +1540,136 @@ private fun DxNetProfileCard(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF54C6EF),
-        border = BorderStroke(2.dp, Color(0xFF126686)),
-        shadowElevation = 3.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(2.9f),
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFFC5ECFA),
+        shadowElevation = 2.dp,
     ) {
         Box(
             modifier = Modifier
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            Color(0xFF39B9EA),
-                            Color(0xFF8DDEFA),
-                            Color(0xFF48C4ED),
-                        ),
-                    ),
-                )
-                .padding(8.dp),
+                .fillMaxSize()
+                .padding(5.dp),
         ) {
             Surface(
+                modifier = Modifier.fillMaxSize(),
                 color = Color(0xFFFCFEFF),
-                shape = RoundedCornerShape(11.dp),
-                border = BorderStroke(1.dp, Color(0xFF7D929D)),
+                shape = RoundedCornerShape(5.dp),
+                border = BorderStroke(1.dp, Color(0xFFC7D1D6)),
+                shadowElevation = 1.dp,
             ) {
                 Row(
-                    modifier = Modifier.padding(8.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    DxNetAvatar(profile)
-                    Spacer(Modifier.width(9.dp))
+                    DxNetAvatar(
+                        profile = profile,
+                        modifier = Modifier.size(84.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
                     Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(50),
-                            border = BorderStroke(1.dp, Color(0xFFF2A300)),
-                            color = Color.Transparent,
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        Brush.horizontalGradient(
-                                            listOf(
-                                                Color(0xFFFFC800),
-                                                Color(0xFFFFEB66),
-                                                Color(0xFFFFC400),
-                                            ),
-                                        ),
-                                    )
-                                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    profile.title.ifBlank {
-                                        "DX NET profile · ${profile.region.label}"
-                                    },
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Black,
-                                    color = Color(0xFF20252A),
-                                )
-                            }
-                        }
-
+                        DxNetTitleBadge(
+                            title = profile.title.ifBlank { "DX NET profile" },
+                            imageUrl = profile.titleBackgroundUrl,
+                        )
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(25.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Surface(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(38.dp),
-                                shape = RoundedCornerShape(7.dp),
-                                color = Color(0xFFFAFCFD),
-                                border = BorderStroke(1.dp, Color(0xFFCCD2D5)),
+                                    .fillMaxHeight(),
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color.White,
+                                border = BorderStroke(1.dp, Color(0xFFDEDEDE)),
                                 shadowElevation = 1.dp,
                             ) {
                                 Box(
-                                    modifier = Modifier.padding(horizontal = 9.dp),
+                                    modifier = Modifier.padding(horizontal = 7.dp),
                                     contentAlignment = Alignment.CenterStart,
                                 ) {
                                     Text(
                                         profile.name,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.labelLarge.copy(fontSize = 10.sp),
-                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 10.sp,
+                                        lineHeight = 10.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color(0xFF111111),
                                     )
                                 }
                             }
                             Spacer(Modifier.width(6.dp))
-                            DxRatingBadge(profile.officialRating)
+                            DxRatingBadge(
+                                rating = profile.officialRating,
+                                imageUrl = profile.ratingBaseUrl,
+                            )
                         }
-
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp),
+                        ) {
+                            drawLine(
+                                color = Color(0xFFB7B7B7),
+                                start = androidx.compose.ui.geometry.Offset.Zero,
+                                end = androidx.compose.ui.geometry.Offset(size.width, 0f),
+                                strokeWidth = 1.dp.toPx(),
+                                cap = StrokeCap.Round,
+                                pathEffect = PathEffect.dashPathEffect(
+                                    floatArrayOf(1.dp.toPx(), 3.dp.toPx()),
+                                ),
+                            )
+                        }
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(25.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             profile.courseRankUrl.takeIf(String::isNotBlank)?.let {
-                                DxNetRankImage(it, "Course")
+                                DxNetRankImage(
+                                    url = it,
+                                    description = "Course rank",
+                                    modifier = Modifier.size(width = 63.dp, height = 25.dp),
+                                )
                             }
                             profile.classRankUrl.takeIf(String::isNotBlank)?.let {
-                                DxNetRankImage(it, "Class")
+                                Spacer(Modifier.width(7.dp))
+                                DxNetRankImage(
+                                    url = it,
+                                    description = "Class rank",
+                                    modifier = Modifier.size(width = 45.dp, height = 25.dp),
+                                )
                             }
-                            if (profile.starCount != null) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color(0xFFFFF7D7),
-                                    border = BorderStroke(1.dp, Color(0xFFFFC64B)),
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Star,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(21.dp),
-                                            tint = Color(0xFFF4A900),
-                                        )
-                                        Spacer(Modifier.width(2.dp))
-                                        Text(
-                                            "×${profile.starCount}",
-                                            fontWeight = FontWeight.Bold,
-                                            style = MaterialTheme.typography.labelLarge,
-                                        )
-                                    }
-                                }
-                            }
-                            if (
-                                profile.courseRankUrl.isBlank() &&
-                                profile.classRankUrl.isBlank() &&
-                                profile.starCount == null
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color(0xFFE8F5FA),
-                                ) {
-                                    Text(
-                                        profile.region.label,
-                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xFF126686),
-                                    )
-                                }
+                            Spacer(Modifier.weight(1f))
+                            profile.starCount?.let { stars ->
+                                AsyncImage(
+                                    model = profile.starIconUrl,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(width = 23.dp, height = 25.dp),
+                                    contentScale = ContentScale.Fit,
+                                )
+                                Spacer(Modifier.width(2.dp))
+                                Text(
+                                    "×$stars",
+                                    maxLines = 1,
+                                    fontSize = 13.sp,
+                                    lineHeight = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xFF202020),
+                                )
                             }
                         }
                     }
@@ -1693,13 +1680,53 @@ private fun DxNetProfileCard(
 }
 
 @Composable
-private fun DxNetAvatar(profile: PlayerProfile) {
+private fun DxNetTitleBadge(title: String, imageUrl: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(21.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.FillBounds,
+        )
+        Text(
+            title,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelMedium.copy(
+                color = Color.Black,
+                fontSize = 10.sp,
+                lineHeight = 10.sp,
+                fontWeight = FontWeight.Black,
+                drawStyle = Stroke(width = 2f),
+            ),
+        )
+        Text(
+            title,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelMedium.copy(
+                color = Color.White,
+                fontSize = 10.sp,
+                lineHeight = 10.sp,
+                fontWeight = FontWeight.Black,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun DxNetAvatar(profile: PlayerProfile, modifier: Modifier = Modifier) {
     Surface(
-        modifier = Modifier.size(78.dp),
-        shape = RoundedCornerShape(10.dp),
+        modifier = modifier,
+        shape = RoundedCornerShape(7.dp),
         color = Color(0xFFE5F6FD),
-        border = BorderStroke(2.dp, Color(0xFF43BDE9)),
-        shadowElevation = 2.dp,
+        border = BorderStroke(2.dp, Color(0xFF9DD8F5)),
+        shadowElevation = 1.dp,
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
@@ -1716,88 +1743,50 @@ private fun DxNetAvatar(profile: PlayerProfile) {
                     contentScale = ContentScale.Crop,
                 )
             }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .size(width = 38.dp, height = 7.dp)
-                    .clip(RoundedCornerShape(bottomStart = 7.dp))
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(Color(0xFFFF5EAE), Color(0xFF7A5CFF)),
-                        ),
-                    ),
-            )
         }
     }
 }
 
 @Composable
-private fun DxRatingBadge(rating: Int) {
-    Surface(
+private fun DxRatingBadge(rating: Int, imageUrl: String) {
+    Box(
         modifier = Modifier
-            .width(80.dp)
-            .height(38.dp),
-        shape = RoundedCornerShape(7.dp),
-        color = Color(0xFF505A60),
-        border = BorderStroke(2.dp, Color(0xFF45D8E8)),
+            .width(89.dp)
+            .height(25.dp),
+        contentAlignment = Alignment.CenterEnd,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .height(38.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color(0xFFFFE544), Color(0xFFFF6C62)),
-                        ),
-                    )
-                    .padding(horizontal = 2.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    "RATING",
-                    fontSize = 5.sp,
-                    lineHeight = 6.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color(0xFF1D2930),
-                )
-            }
-            Text(
-                rating.toString(),
-                modifier = Modifier.weight(1f),
-                color = Color.White,
-                fontWeight = FontWeight.Black,
-                fontSize = 13.sp,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
-        }
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.FillBounds,
+        )
+        Text(
+            rating.toString(),
+            modifier = Modifier.padding(end = 6.dp),
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp,
+            lineHeight = 13.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+        )
     }
 }
 
 @Composable
-private fun DxNetRankImage(url: String, fallbackLabel: String) {
-    Surface(
-        modifier = Modifier
-            .width(72.dp)
-            .height(36.dp),
-        shape = RoundedCornerShape(7.dp),
-        color = Color(0xFFF2F5F7),
-        border = BorderStroke(1.dp, Color(0xFFCBD3D7)),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                fallbackLabel,
-                style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFF60717A),
-            )
-            AsyncImage(
-                model = url,
-                contentDescription = "$fallbackLabel rank",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
-            )
-        }
-    }
+private fun DxNetRankImage(
+    url: String,
+    description: String,
+    modifier: Modifier = Modifier,
+) {
+    AsyncImage(
+        model = url,
+        contentDescription = description,
+        modifier = modifier,
+        contentScale = ContentScale.Fit,
+    )
 }
+
 
 @Composable
 private fun ChartDetailDialog(

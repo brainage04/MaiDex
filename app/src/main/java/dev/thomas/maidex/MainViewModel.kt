@@ -144,11 +144,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             importStatus.value = ImportStatus.Running("Starting import…")
             runCatching {
-                dxClient.import(region, charts) { message ->
+                val result = dxClient.import(region, charts) { message ->
                     importStatus.value = ImportStatus.Running(message)
-                }.also { result ->
-                    withContext(Dispatchers.IO) { userRepository.saveImport(result) }
                 }
+                val cachedProfile = withContext(Dispatchers.IO) { userRepository.saveImport(result) }
+                result.copy(profile = cachedProfile)
             }.onSuccess { result ->
                 scores.value = result.scores.associateBy(UserScore::chartKey)
                 playDetails.value = withContext(Dispatchers.IO) { userRepository.loadPlayDetails() }

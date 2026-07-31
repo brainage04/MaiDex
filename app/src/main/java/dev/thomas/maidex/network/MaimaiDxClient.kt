@@ -242,6 +242,11 @@ internal fun extractPlayerProfile(
     val ratingText = block.selectFirst(".rating_block")?.text().orEmpty()
     if (name.isBlank() && ratingText.isBlank()) return null
 
+    val titleRarity = block.selectFirst(".trophy_block")
+        ?.classNames()
+        ?.firstOrNull { it.startsWith("trophy_") && it != "trophy_block" }
+        ?.removePrefix("trophy_")
+        .orEmpty()
     val rankImages = block.select("img.h_35.f_l")
     val courseRank = rankImages.firstOrNull { !it.hasClass("p_l_10") }
     val classRank = rankImages.firstOrNull { it.hasClass("p_l_10") }
@@ -253,6 +258,7 @@ internal fun extractPlayerProfile(
         officialRating = parseInt(ratingText),
         region = region,
         title = block.selectFirst(".trophy_inner_block")?.text()?.trim().orEmpty(),
+        titleRarity = titleRarity,
         starCount = parseInt(starText).takeIf { starText.isNotBlank() },
         avatarUrl = block.selectFirst("img.w_112.f_l").imageUrl(),
         courseRankUrl = courseRank.imageUrl(),

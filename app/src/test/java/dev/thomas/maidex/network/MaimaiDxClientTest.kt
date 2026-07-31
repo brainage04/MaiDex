@@ -26,7 +26,9 @@ class MaimaiDxClientTest {
             """
             <div class="see_through_block">
               <img class="w_112 f_l" src="/maimai-mobile/img/avatar.png">
-              <div class="trophy_inner_block f_13">INFiNiTE ENERZY -Overdoze-</div>
+              <div class="trophy_block trophy_gold p_3 t_c f_0">
+                <div class="trophy_inner_block f_13">INFiNiTE ENERZY -Overdoze-</div>
+              </div>
               <div class="name_block f_l f_16">B r a i n a g e</div>
               <div class="rating_block">16070</div>
               <img class="h_35 f_l" src="/maimai-mobile/img/course.png">
@@ -48,6 +50,7 @@ class MaimaiDxClientTest {
         assertEquals("INFiNiTE ENERZY -Overdoze-", profile.title)
         assertEquals(355, profile.starCount)
         assertEquals("https://maimaidx-eng.com/maimai-mobile/img/avatar.png", profile.avatarUrl)
+        assertEquals("gold", profile.titleRarity)
         assertEquals("https://maimaidx-eng.com/maimai-mobile/img/course.png", profile.courseRankUrl)
         assertEquals("https://maimaidx-eng.com/maimai-mobile/img/class.png", profile.classRankUrl)
         assertEquals(123L, profile.importedAt)

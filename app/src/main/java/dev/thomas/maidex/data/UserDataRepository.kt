@@ -5,10 +5,12 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import org.json.JSONObject
+import java.io.File
 
 class UserDataRepository(context: Context) {
     private val helper = UserDatabase(context)
     private val preferences = context.getSharedPreferences("player-profile", Context.MODE_PRIVATE)
+    private val profileAssetCache = ProfileAssetCache(File(context.filesDir, "profile-assets"))
 
     fun loadScores(): Map<String, UserScore> = helper.readableDatabase.rawQuery(
         """SELECT chart_key, achievement, grade, combo_medal, sync_medal,
@@ -53,20 +55,25 @@ class UserDataRepository(context: Context) {
 
     fun loadProfile(): PlayerProfile? {
         val regionName = preferences.getString("region", null) ?: return null
-        return PlayerProfile(
+        return DxNetAssets.decorate(PlayerProfile(
             name = preferences.getString("name", "Player").orEmpty(),
             officialRating = preferences.getInt("rating", 0),
             region = enumValueOr(regionName, AccountRegion.INTERNATIONAL),
             title = preferences.getString("title", "").orEmpty(),
+            titleRarity = preferences.getString("title_rarity", "").orEmpty(),
             starCount = preferences.getInt("star_count", -1).takeIf { it >= 0 },
             avatarUrl = preferences.getString("avatar_url", "").orEmpty(),
             courseRankUrl = preferences.getString("course_rank_url", "").orEmpty(),
+            titleBackgroundUrl = preferences.getString("title_background_url", "").orEmpty(),
+            ratingBaseUrl = preferences.getString("rating_base_url", "").orEmpty(),
+            starIconUrl = preferences.getString("star_icon_url", "").orEmpty(),
             classRankUrl = preferences.getString("class_rank_url", "").orEmpty(),
             importedAt = preferences.getLong("imported_at", 0L),
-        )
+        ))
     }
 
-    fun saveImport(result: ImportResult) {
+    fun saveImport(result: ImportResult): PlayerProfile {
+        val profile = profileAssetCache.cache(result.profile)
         helper.writableDatabase.transaction {
             delete("scores", null, null)
             result.scores.forEach { score ->
@@ -103,17 +110,22 @@ class UserDataRepository(context: Context) {
             }
         }
         val editor = preferences.edit()
-            .putString("name", result.profile.name)
-            .putInt("rating", result.profile.officialRating)
-            .putString("region", result.profile.region.name)
-            .putString("title", result.profile.title)
-            .putString("avatar_url", result.profile.avatarUrl)
-            .putString("course_rank_url", result.profile.courseRankUrl)
-            .putString("class_rank_url", result.profile.classRankUrl)
-            .putLong("imported_at", result.profile.importedAt)
-        result.profile.starCount?.let { editor.putInt("star_count", it) }
+            .putString("name", profile.name)
+            .putInt("rating", profile.officialRating)
+            .putString("region", profile.region.name)
+            .putString("title", profile.title)
+            .putString("title_rarity", profile.titleRarity)
+            .putString("avatar_url", profile.avatarUrl)
+            .putString("course_rank_url", profile.courseRankUrl)
+            .putString("class_rank_url", profile.classRankUrl)
+            .putString("title_background_url", profile.titleBackgroundUrl)
+            .putString("rating_base_url", profile.ratingBaseUrl)
+            .putString("star_icon_url", profile.starIconUrl)
+            .putLong("imported_at", profile.importedAt)
+        profile.starCount?.let { editor.putInt("star_count", it) }
             ?: editor.remove("star_count")
         editor.apply()
+        return profile
     }
 
     fun clear() {
@@ -122,6 +134,7 @@ class UserDataRepository(context: Context) {
             delete("play_details", null, null)
         }
         preferences.edit().clear().apply()
+        profileAssetCache.clear()
     }
 }
 
