@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.MilitaryTech
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Info
@@ -97,6 +98,10 @@ import dev.thomas.maidex.CatalogUiState
 import dev.thomas.maidex.ImportStatus
 import dev.thomas.maidex.MainViewModel
 import dev.thomas.maidex.data.AccountRegion
+import dev.thomas.maidex.data.DanCourse
+import dev.thomas.maidex.data.DanCourseGroup
+import dev.thomas.maidex.data.DanCourseMetadata
+import dev.thomas.maidex.data.DanTrack
 import dev.thomas.maidex.data.ChartFilters
 import dev.thomas.maidex.data.ChartSort
 import dev.thomas.maidex.data.ComboMedal
@@ -127,6 +132,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
     var showAbout by remember { mutableStateOf(false) }
     var showAccount by remember { mutableStateOf(false) }
     var showUnlockGuide by remember { mutableStateOf(false) }
+    var showDanGuide by remember { mutableStateOf(false) }
     var selectedUnlockGuideEntryId by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
@@ -150,6 +156,9 @@ fun MaiDexApp(viewModel: MainViewModel) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showDanGuide = true }) {
+                        Icon(Icons.Default.MilitaryTech, contentDescription = "Dan course guides")
+                    }
                     IconButton(onClick = {
                         selectedUnlockGuideEntryId = null
                         showUnlockGuide = true
@@ -265,6 +274,17 @@ fun MaiDexApp(viewModel: MainViewModel) {
             onDismiss = {
                 showUnlockGuide = false
                 selectedUnlockGuideEntryId = null
+            },
+        )
+    }
+    if (showDanGuide) {
+        DanGuideDialog(
+            charts = state.allCharts,
+            initialRegion = state.profile?.region ?: AccountRegion.INTERNATIONAL,
+            onDismiss = { showDanGuide = false },
+            onChart = { chart ->
+                showDanGuide = false
+                selectedChart = chart
             },
         )
     }
@@ -694,6 +714,262 @@ private fun MedalPill(label: String, color: Color) {
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Black,
         )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DanGuideDialog(
+    charts: List<SongChart>,
+    initialRegion: AccountRegion,
+    onDismiss: () -> Unit,
+    onChart: (SongChart) -> Unit,
+) {
+    val context = LocalContext.current
+    val chartLookup = remember(charts) { DanCourseMetadata.chartLookup(charts) }
+    var region by remember(initialRegion) { mutableStateOf(initialRegion) }
+    var group by remember { mutableStateOf(DanCourseGroup.TRUE) }
+    val courses = DanCourseMetadata.courses.filter { it.group == group }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.94f),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Dan courses", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(
+                            "${DanCourseMetadata.version} · 22 courses · 88 charts",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(DanCourseMetadata.sourceUrl(region))),
+                            )
+                        },
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.OpenInNew,
+                            contentDescription = "Open Dan course source",
+                        )
+                    }
+                    TextButton(onClick = onDismiss) { Text("Close") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AccountRegion.entries.forEach { option ->
+                        FilterChip(
+                            selected = region == option,
+                            onClick = { region = option },
+                            label = { Text(option.label) },
+                        )
+                    }
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    DanCourseGroup.entries.forEach { option ->
+                        FilterChip(
+                            selected = group == option,
+                            onClick = { group = option },
+                            label = {
+                                Text(
+                                    when (option) {
+                                        DanCourseGroup.NORMAL -> "Dan 1–10"
+                                        DanCourseGroup.TRUE -> "Shin Dan"
+                                        DanCourseGroup.URA -> "Ura Kaiden"
+                                    },
+                                )
+                            },
+                        )
+                    }
+                }
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text(
+                        "Play four fixed charts in order and finish with Life remaining. " +
+                            "Normal courses continue at 0 Life; Shin Dan and Ura Kaiden end immediately. " +
+                            "Clear Tenth Dan → Shin Dan; Shin Tenth → Shin Kaiden → Ura Kaiden.",
+                        modifier = Modifier.padding(10.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(courses, key = DanCourse::id) { course ->
+                        DanCourseCard(
+                            course = course,
+                            region = region,
+                            chartLookup = chartLookup,
+                            onChart = onChart,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DanCourseCard(
+    course: DanCourse,
+    region: AccountRegion,
+    chartLookup: Map<String, SongChart>,
+    onChart: (SongChart) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = when (course.group) {
+            DanCourseGroup.NORMAL -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            DanCourseGroup.TRUE -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)
+            DanCourseGroup.URA -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+        },
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Column(Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(course.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text(
+                        course.nameEnglish,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(50),
+                ) {
+                    Text(
+                        "♥ ${course.life.maximum} Life",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+            }
+            Text(
+                "Great −${course.life.greatDamage} · Good −${course.life.goodDamage} · " +
+                    "Miss −${course.life.missDamage} · Track +${course.life.trackBonus}",
+                modifier = Modifier.padding(vertical = 6.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            course.tracks.indices.forEach { index ->
+                val track = course.track(index, region)
+                val chart = chartLookup[DanCourseMetadata.chartKey(track)]
+                DanTrackRow(
+                    number = index + 1,
+                    track = track,
+                    chart = chart,
+                    onChart = onChart,
+                )
+                if (index != course.tracks.lastIndex) {
+                    Spacer(Modifier.height(5.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DanTrackRow(
+    number: Int,
+    track: DanTrack,
+    chart: SongChart?,
+    onChart: (SongChart) -> Unit,
+) {
+    val chartLabel = buildString {
+        append(typeLabel(track.type))
+        append(" · ")
+        append(difficultyLabel(track.difficulty))
+        append(' ')
+        append(chart?.level ?: "?")
+        chart?.constant?.let {
+            append(" (")
+            append(String.format(Locale.US, "%.1f", it))
+            append(')')
+        }
+    }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = chart != null) { chart?.let(onChart) },
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(7.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AsyncImage(
+                model = chart?.imageUrl,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(7.dp)),
+                contentScale = ContentScale.Crop,
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "TRACK $number",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Black,
+                )
+                Text(
+                    titleWithRomanization(track.title, chart?.titleRomanized.orEmpty()),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (chart == null) {
+                    Text(
+                        "Chart unavailable in this catalog",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                } else {
+                    Spacer(Modifier.height(3.dp))
+                    Surface(
+                        color = difficultyColor(track.difficulty).copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(7.dp),
+                    ) {
+                        Text(
+                            chartLabel,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = difficultyColor(track.difficulty),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
