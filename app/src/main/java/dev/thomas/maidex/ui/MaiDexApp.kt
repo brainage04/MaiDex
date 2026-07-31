@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -45,12 +46,10 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -87,6 +86,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -98,11 +98,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import dev.thomas.maidex.BuildConfig
 import dev.thomas.maidex.DxNetLoginActivity
 import dev.thomas.maidex.CatalogUiState
 import dev.thomas.maidex.ImportStatus
 import dev.thomas.maidex.MainViewModel
 import dev.thomas.maidex.data.AccountRegion
+import dev.thomas.maidex.data.CatalogInfo
 import dev.thomas.maidex.data.DanCourse
 import dev.thomas.maidex.data.DanCourseGroup
 import dev.thomas.maidex.data.DanCourseMetadata
@@ -182,26 +184,29 @@ fun MaiDexApp(viewModel: MainViewModel) {
                         }
                     }
                     IconButton(onClick = { showAbout = true }) {
-                        Icon(Icons.Default.Info, contentDescription = "About catalog")
+                        Icon(Icons.Default.Info, contentDescription = "Info")
                     }
-                    BadgedBox(
-                        badge = {
-                            if (state.filters.activeCount > 0) {
-                                Badge(
-                                    modifier = Modifier.size(20.dp),
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                                ) {
-                                    Text(
-                                        state.filters.activeCount.toString(),
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                }
-                            }
-                        },
+                    Box(
+                        modifier = Modifier.size(48.dp),
+                        contentAlignment = Alignment.Center,
                     ) {
                         IconButton(onClick = { showFilters = true }) {
                             Icon(Icons.Default.FilterList, contentDescription = "Open filters")
+                        }
+                        if (state.filters.activeCount > 0) {
+                            Badge(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = (-2).dp, y = 2.dp)
+                                    .size(20.dp),
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ) {
+                                Text(
+                                    state.filters.activeCount.toString(),
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
                         }
                     }
                 },
@@ -292,7 +297,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
     }
     if (showDanGuide) {
         DanGuideDialog(
-            charts = state.allCharts,
+            chartLookup = state.danChartLookup,
             initialRegion = state.profile?.region ?: AccountRegion.INTERNATIONAL,
             onDismiss = { showDanGuide = false },
             onChart = { chart ->
@@ -302,18 +307,121 @@ fun MaiDexApp(viewModel: MainViewModel) {
         )
     }
     if (showAbout) {
-        AlertDialog(
-            onDismissRequest = { showAbout = false },
-            title = { Text("Offline catalog") },
-            text = {
+        InfoDialog(
+            info = state.info,
+            onDismiss = { showAbout = false },
+        )
+    }
+}
+
+@Composable
+private fun InfoDialog(
+    info: CatalogInfo?,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("Info")
                 Text(
-                    "${state.info?.songCount ?: 0} songs and ${state.info?.chartCount ?: 0} charts. " +
-                        "Metadata: arcade-songs, updated ${state.info?.updateTime?.take(10).orEmpty()}. " +
-                        "Community English aliases improve romanised search. Cover art is cached after loading. " +
-                        "DX NET cookies and imported scores remain on this device.",
+                    "MaiDex ${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            },
-            confirmButton = { TextButton(onClick = { showAbout = false }) { Text("Close") } },
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    InfoMetric(
+                        value = (info?.songCount ?: 0).toString(),
+                        label = "Songs",
+                        modifier = Modifier.weight(1f),
+                    )
+                    InfoMetric(
+                        value = (info?.chartCount ?: 0).toString(),
+                        label = "Charts",
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                InfoSection(
+                    title = "Offline catalog",
+                    body = "Search, filters, chart constants, note counts, unlock guides, and Dan courses " +
+                        "are bundled with the app and remain available without a connection.",
+                )
+                InfoSection(
+                    title = "Metadata",
+                    body = "Song data comes from arcade-songs and was updated " +
+                        "${info?.updateTime?.take(10).orEmpty().ifBlank { "with this build" }}. " +
+                        "Community romanisations and aliases improve title and artist search.",
+                )
+                InfoSection(
+                    title = "DX NET and privacy",
+                    body = "Sign-in happens on the official DX NET site. Imported scores, recent-play " +
+                        "details, cookies, and cached profile artwork stay in app-private storage on this " +
+                        "device. MaiDex does not store your SEGA ID password.",
+                )
+                InfoSection(
+                    title = "Images and matching",
+                    body = "Cover art is cached after viewing, and profile artwork is cached after Refresh. " +
+                        "DX NET scores are matched by song, chart type, difficulty, and level. A newly added " +
+                        "or renamed chart may remain unmatched until the offline catalog is updated.",
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    context.startActivity(
+                        Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://arcade-songs.zetaraku.dev/maimai/"),
+                        ),
+                    )
+                },
+            ) { Text("Data source") }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+@Composable
+private fun InfoMetric(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text(label, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+@Composable
+private fun InfoSection(title: String, body: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        Text(
+            body,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -348,13 +456,12 @@ private fun CatalogContent(
             },
             label = { Text("Find a chart constant") },
             placeholder = { Text("Title, romaji, artist, or notes designer") },
-            supportingText = { Text("Internal constants are shown in parentheses on every chart") },
         )
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             SortMenu(
                 selected = state.sort,
@@ -396,7 +503,7 @@ private fun CatalogContent(
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
         if (state.charts.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -733,13 +840,12 @@ private fun MedalPill(label: String, color: Color) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DanGuideDialog(
-    charts: List<SongChart>,
+    chartLookup: Map<String, SongChart>,
     initialRegion: AccountRegion,
     onDismiss: () -> Unit,
     onChart: (SongChart) -> Unit,
 ) {
     val context = LocalContext.current
-    val chartLookup = remember(charts) { DanCourseMetadata.chartLookup(charts) }
     var region by remember(initialRegion) { mutableStateOf(initialRegion) }
     var group by remember { mutableStateOf(DanCourseGroup.TRUE) }
     val courses = DanCourseMetadata.courses.filter { it.group == group }
@@ -1173,115 +1279,147 @@ private fun FilterDialog(
                         maxBpm = ""
                     }) { Text("Reset") }
                 }
-                Column(
+                LazyColumn(
                     modifier = Modifier
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState()),
+                        .fillMaxWidth()
+                        .weight(1f),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    OutlinedTextField(
-                        value = draft.artist,
-                        onValueChange = { draft = draft.copy(artist = it) },
-                        label = { Text("Artist") },
-                        placeholder = { Text("Original or romanised name") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = draft.noteDesigner,
-                        onValueChange = { draft = draft.copy(noteDesigner = it) },
-                        label = { Text("Notes designer") },
-                        placeholder = { Text("Original or romanised name") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    RangeFields(
-                        title = "Level / constant range",
-                        minimum = minLevel,
-                        maximum = maxLevel,
-                        keyboardType = KeyboardType.Decimal,
-                        onMinimum = { minLevel = it },
-                        onMaximum = { maxLevel = it },
-                    )
-                    RangeFields(
-                        title = "BPM range",
-                        minimum = minBpm,
-                        maximum = maxBpm,
-                        keyboardType = KeyboardType.Number,
-                        onMinimum = { minBpm = it.filter(Char::isDigit) },
-                        onMaximum = { maxBpm = it.filter(Char::isDigit) },
-                    )
-                    ConstantAvailabilityMenu(
-                        selected = draft.constantAvailability,
-                        onSelect = { draft = draft.copy(constantAvailability = it) },
-                    )
-                    if (hasScores) {
-                        Text(
-                            "My scores",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Row(
+                    item(key = "artist") {
+                        OutlinedTextField(
+                            value = draft.artist,
+                            onValueChange = { draft = draft.copy(artist = it) },
+                            label = { Text("Artist") },
+                            placeholder = { Text("Original or romanised name") },
                             modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text("Played charts only", modifier = Modifier.weight(1f))
-                            Switch(
-                                checked = draft.scoredOnly,
-                                onCheckedChange = { draft = draft.copy(scoredOnly = it) },
+                            singleLine = true,
+                        )
+                    }
+                    item(key = "designer") {
+                        OutlinedTextField(
+                            value = draft.noteDesigner,
+                            onValueChange = { draft = draft.copy(noteDesigner = it) },
+                            label = { Text("Notes designer") },
+                            placeholder = { Text("Original or romanised name") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                        )
+                    }
+                    item(key = "level-range") {
+                        RangeFields(
+                            title = "Level / constant range",
+                            minimum = minLevel,
+                            maximum = maxLevel,
+                            keyboardType = KeyboardType.Decimal,
+                            onMinimum = { minLevel = it },
+                            onMaximum = { maxLevel = it },
+                        )
+                    }
+                    item(key = "bpm-range") {
+                        RangeFields(
+                            title = "BPM range",
+                            minimum = minBpm,
+                            maximum = maxBpm,
+                            keyboardType = KeyboardType.Number,
+                            onMinimum = { minBpm = it.filter(Char::isDigit) },
+                            onMaximum = { maxBpm = it.filter(Char::isDigit) },
+                        )
+                    }
+                    item(key = "constant-availability") {
+                        ConstantAvailabilityMenu(
+                            selected = draft.constantAvailability,
+                            onSelect = { draft = draft.copy(constantAvailability = it) },
+                        )
+                    }
+                    if (hasScores) {
+                        item(key = "score-heading") {
+                            Text(
+                                "My scores",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
                             )
                         }
-                        MultiSelectSection(
-                            "Rank",
-                            Grade.entries,
-                            draft.grades,
-                            label = Grade::label,
-                        ) { draft = draft.copy(grades = it) }
-                        MultiSelectSection(
-                            "Achievement medal",
-                            ComboMedal.entries.filterNot { it == ComboMedal.NONE },
-                            draft.comboMedals,
-                            label = ComboMedal::label,
-                        ) { draft = draft.copy(comboMedals = it) }
-                        MultiSelectSection(
-                            "Sync medal",
-                            SyncMedal.entries.filterNot { it == SyncMedal.NONE },
-                            draft.syncMedals,
-                            label = SyncMedal::label,
-                        ) { draft = draft.copy(syncMedals = it) }
-                        HorizontalDivider()
+                        item(key = "played-only") {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("Played charts only", modifier = Modifier.weight(1f))
+                                Switch(
+                                    checked = draft.scoredOnly,
+                                    onCheckedChange = { draft = draft.copy(scoredOnly = it) },
+                                )
+                            }
+                        }
+                        item(key = "rank") {
+                            MultiSelectSection(
+                                "Rank",
+                                Grade.entries,
+                                draft.grades,
+                                label = Grade::label,
+                            ) { draft = draft.copy(grades = it) }
+                        }
+                        item(key = "achievement-medal") {
+                            MultiSelectSection(
+                                "Achievement medal",
+                                ComboMedal.entries.filterNot { it == ComboMedal.NONE },
+                                draft.comboMedals,
+                                label = ComboMedal::label,
+                            ) { draft = draft.copy(comboMedals = it) }
+                        }
+                        item(key = "sync-medal") {
+                            MultiSelectSection(
+                                "Sync medal",
+                                SyncMedal.entries.filterNot { it == SyncMedal.NONE },
+                                draft.syncMedals,
+                                label = SyncMedal::label,
+                            ) { draft = draft.copy(syncMedals = it) }
+                        }
+                        item(key = "score-divider") { HorizontalDivider() }
                     } else {
-                        Text(
-                            "Sign in to DX NET to filter by rank, achievement medal, and sync medal.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        item(key = "score-sign-in") {
+                            Text(
+                                "Sign in to DX NET to filter by rank, achievement medal, and sync medal.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
-                    MultiSelectSection("Category", options.categories, draft.categories) {
-                        draft = draft.copy(categories = it)
+                    item(key = "category") {
+                        MultiSelectSection("Category", options.categories, draft.categories) {
+                            draft = draft.copy(categories = it)
+                        }
                     }
-                    MultiSelectSection(
-                        "Difficulty",
-                        options.difficulties,
-                        draft.difficulties,
-                        label = { difficultyLabel(it) },
-                    ) { draft = draft.copy(difficulties = it) }
-                    MultiSelectSection(
-                        "Type",
-                        options.types,
-                        draft.types,
-                        label = { typeLabel(it) },
-                    ) { draft = draft.copy(types = it) }
-                    MultiSelectSection(
-                        "Region",
-                        options.regions,
-                        draft.regions,
-                        label = { regionLabel(it) },
-                    ) { draft = draft.copy(regions = it) }
-                    MultiSelectSection("Version", options.versions, draft.versions) {
-                        draft = draft.copy(versions = it)
+                    item(key = "difficulty") {
+                        MultiSelectSection(
+                            "Difficulty",
+                            options.difficulties,
+                            draft.difficulties,
+                            label = { difficultyLabel(it) },
+                        ) { draft = draft.copy(difficulties = it) }
                     }
-                    Spacer(Modifier.height(4.dp))
+                    item(key = "type") {
+                        MultiSelectSection(
+                            "Type",
+                            options.types,
+                            draft.types,
+                            label = { typeLabel(it) },
+                        ) { draft = draft.copy(types = it) }
+                    }
+                    item(key = "region") {
+                        MultiSelectSection(
+                            "Region",
+                            options.regions,
+                            draft.regions,
+                            label = { regionLabel(it) },
+                        ) { draft = draft.copy(regions = it) }
+                    }
+                    item(key = "version") {
+                        MultiSelectSection("Version", options.versions, draft.versions) {
+                            draft = draft.copy(versions = it)
+                        }
+                    }
+                    item(key = "bottom-space") { Spacer(Modifier.height(4.dp)) }
                 }
                 Row(
                     modifier = Modifier
@@ -1373,6 +1511,7 @@ private fun AccountDialog(
     onDismiss: () -> Unit,
 ) {
     var region by remember(profile) { mutableStateOf(profile?.region ?: AccountRegion.INTERNATIONAL) }
+    var showProfileCloseUp by remember(profile) { mutableStateOf(false) }
     val context = LocalContext.current
     val isImporting = importStatus is ImportStatus.Running
 
@@ -1428,7 +1567,9 @@ private fun AccountDialog(
                 if (profile != null) {
                     DxNetProfileCard(
                         profile = profile,
-                        modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+                        modifier = Modifier
+                            .padding(top = 6.dp, bottom = 8.dp)
+                            .clickable { showProfileCloseUp = true },
                     )
                 } else {
                     Surface(
@@ -1470,12 +1611,31 @@ private fun AccountDialog(
                         Spacer(Modifier.width(9.dp))
                         Text(importStatus.message)
                     }
-                    is ImportStatus.Success -> Text(
-                        "Imported ${importStatus.imported} scores and ${importStatus.recentDetails} recent details" +
-                            if (importStatus.unmatched > 0) " · ${importStatus.unmatched} unmatched" else "",
+                    is ImportStatus.Success -> Column(
                         modifier = Modifier.padding(vertical = 8.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            "Imported ${importStatus.imported} scores and " +
+                                "${importStatus.recentDetails} recent play details.",
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        if (importStatus.unmatched > 0) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                shape = RoundedCornerShape(10.dp),
+                            ) {
+                                Text(
+                                    "${importStatus.unmatched} DX NET score entries could not be matched " +
+                                        "to this catalog, so they are not shown. This usually means a chart " +
+                                        "was added or renamed before the offline metadata was updated.",
+                                    modifier = Modifier.padding(10.dp),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                )
+                            }
+                        }
+                    }
                     is ImportStatus.Failure -> Text(
                         importStatus.message,
                         modifier = Modifier.padding(vertical = 8.dp),
@@ -1539,6 +1699,54 @@ private fun AccountDialog(
             }
         }
     }
+    if (profile != null && showProfileCloseUp) {
+        ProfileCardCloseUpDialog(
+            profile = profile,
+            onDismiss = { showProfileCloseUp = false },
+        )
+    }
+}
+
+@Composable
+private fun ProfileCardCloseUpDialog(
+    profile: PlayerProfile,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                DxNetProfileCard(
+                    profile = profile,
+                    modifier = Modifier
+                        .fillMaxWidth(0.96f)
+                        .widthIn(max = 720.dp),
+                )
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.9f),
+                    shape = RoundedCornerShape(50),
+                ) {
+                    Text(
+                        "Tap anywhere to close",
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -1546,6 +1754,9 @@ private fun DxNetProfileCard(
     profile: PlayerProfile,
     modifier: Modifier = Modifier,
 ) {
+    val density = LocalDensity.current
+    val nameFontSize = with(density) { 12.dp.toSp() }
+    val starFontSize = with(density) { 13.dp.toSp() }
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -1610,8 +1821,8 @@ private fun DxNetProfileCard(
                                         profile.name,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        fontSize = 12.sp,
-                                        lineHeight = 12.sp,
+                                        fontSize = nameFontSize,
+                                        lineHeight = nameFontSize,
                                         fontFamily = FontFamily.SansSerif,
                                         fontWeight = FontWeight.Normal,
                                         letterSpacing = 0.sp,
@@ -1674,8 +1885,8 @@ private fun DxNetProfileCard(
                                 Text(
                                     "×$stars",
                                     maxLines = 1,
-                                    fontSize = 13.sp,
-                                    lineHeight = 13.sp,
+                                    fontSize = starFontSize,
+                                    lineHeight = starFontSize,
                                     fontFamily = FontFamily.SansSerif,
                                     fontWeight = FontWeight.Normal,
                                     letterSpacing = 0.sp,
@@ -1692,6 +1903,7 @@ private fun DxNetProfileCard(
 
 @Composable
 private fun DxNetTitleBadge(title: String, imageUrl: String) {
+    val fontSize = with(LocalDensity.current) { 11.dp.toSp() }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1710,8 +1922,8 @@ private fun DxNetTitleBadge(title: String, imageUrl: String) {
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelMedium.copy(
                 color = Color.Black,
-                fontSize = 11.sp,
-                lineHeight = 11.sp,
+                fontSize = fontSize,
+                lineHeight = fontSize,
                 fontFamily = FontFamily.SansSerif,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.sp,
@@ -1724,8 +1936,8 @@ private fun DxNetTitleBadge(title: String, imageUrl: String) {
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelMedium.copy(
                 color = Color.White,
-                fontSize = 11.sp,
-                lineHeight = 11.sp,
+                fontSize = fontSize,
+                lineHeight = fontSize,
                 fontFamily = FontFamily.SansSerif,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.sp,
@@ -1764,10 +1976,11 @@ private fun DxNetAvatar(profile: PlayerProfile, modifier: Modifier = Modifier) {
 
 @Composable
 private fun DxRatingBadge(rating: Int, imageUrl: String) {
+    val fontSize = with(LocalDensity.current) { 13.dp.toSp() }
     Box(
         modifier = Modifier
-            .width(89.dp)
-            .height(25.dp),
+            .width(73.dp)
+            .height(21.dp),
         contentAlignment = Alignment.CenterEnd,
     ) {
         AsyncImage(
@@ -1782,8 +1995,8 @@ private fun DxRatingBadge(rating: Int, imageUrl: String) {
             color = Color.White,
             fontFamily = FontFamily.SansSerif,
             fontWeight = FontWeight.Bold,
-            fontSize = 13.sp,
-            lineHeight = 13.sp,
+            fontSize = fontSize,
+            lineHeight = fontSize,
             letterSpacing = 0.sp,
             textAlign = androidx.compose.ui.text.style.TextAlign.End,
         )

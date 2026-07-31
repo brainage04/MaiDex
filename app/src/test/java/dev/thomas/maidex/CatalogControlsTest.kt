@@ -2,11 +2,15 @@ package dev.thomas.maidex
 
 import dev.thomas.maidex.data.ChartFilters
 import dev.thomas.maidex.data.ChartSort
+import dev.thomas.maidex.data.ComboMedal
 import dev.thomas.maidex.data.ConstantAvailability
+import dev.thomas.maidex.data.Grade
 import dev.thomas.maidex.data.NoteCounts
 import dev.thomas.maidex.data.Regions
 import dev.thomas.maidex.data.SongChart
 import dev.thomas.maidex.data.SortOrder
+import dev.thomas.maidex.data.SyncMedal
+import dev.thomas.maidex.data.UserScore
 import dev.thomas.maidex.ui.titleWithRomanization
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -19,17 +23,37 @@ class CatalogControlsTest {
     private val charts = listOf(knownLow, knownHigh, unknown, utage)
 
     @Test
-    fun `constant sort supports both orders and leaves unknown constants last`() {
+    fun `level sort supports both orders and uses effective levels`() {
         val withoutUtage = ChartFilters(showUtage = false)
 
         assertEquals(
-            listOf("Known low", "Known high", "Unknown"),
-            filterAndSort(charts, withoutUtage, ChartSort.CONSTANT, SortOrder.ASCENDING, emptyMap())
+            listOf("Known low", "Unknown", "Known high"),
+            filterAndSort(charts, withoutUtage, ChartSort.LEVEL, SortOrder.ASCENDING, emptyMap())
                 .map(SongChart::title),
         )
         assertEquals(
+            listOf("Known high", "Unknown", "Known low"),
+            filterAndSort(charts, withoutUtage, ChartSort.LEVEL, SortOrder.DESCENDING, emptyMap())
+                .map(SongChart::title),
+        )
+    }
+
+    @Test
+    fun `DX score sort supports both orders and leaves unplayed charts last`() {
+        val scores = mapOf(
+            knownLow.chartKey to score(knownLow, 2_000),
+            knownHigh.chartKey to score(knownHigh, 1_000),
+        )
+        val withoutUtage = ChartFilters(showUtage = false)
+
+        assertEquals(
             listOf("Known high", "Known low", "Unknown"),
-            filterAndSort(charts, withoutUtage, ChartSort.CONSTANT, SortOrder.DESCENDING, emptyMap())
+            filterAndSort(charts, withoutUtage, ChartSort.DX_SCORE, SortOrder.ASCENDING, scores)
+                .map(SongChart::title),
+        )
+        assertEquals(
+            listOf("Known low", "Known high", "Unknown"),
+            filterAndSort(charts, withoutUtage, ChartSort.DX_SCORE, SortOrder.DESCENDING, scores)
                 .map(SongChart::title),
         )
     }
@@ -75,6 +99,16 @@ class CatalogControlsTest {
         )
         assertEquals("(no title)", titleWithRomanization("\u3000", "(no title)"))
     }
+
+    private fun score(chart: SongChart, dxScore: Int) = UserScore(
+        chartKey = chart.chartKey,
+        achievement = 100.0,
+        grade = Grade.SSS,
+        comboMedal = ComboMedal.NONE,
+        syncMedal = SyncMedal.NONE,
+        dxScore = dxScore,
+        maxDxScore = 3_000,
+    )
 
     private fun chart(
         id: Long,

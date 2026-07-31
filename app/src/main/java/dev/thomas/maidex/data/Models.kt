@@ -174,12 +174,12 @@ enum class ConstantAvailability(val label: String) {
 }
 
 enum class ChartSort(val label: String) {
-    CONSTANT("Constant"),
     LEVEL("Level"),
     TITLE("Title"),
     RATING("Rating"),
     ACHIEVEMENT("Achievement"),
     GRADE("Rank"),
+    DX_SCORE("DX score"),
     RELEASE("Release"),
     BPM("BPM"),
 }

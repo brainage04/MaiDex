@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dev.thomas.maidex.data.AccountRegion
 import dev.thomas.maidex.data.CatalogInfo
 import dev.thomas.maidex.data.CatalogRepository
+import dev.thomas.maidex.data.DanCourseMetadata
 import dev.thomas.maidex.data.ChartFilters
 import dev.thomas.maidex.data.ChartSort
 import dev.thomas.maidex.data.ConstantAvailability
@@ -71,6 +72,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             CatalogUiState(
                 charts = visible,
                 allCharts = loaded.charts,
+                danChartLookup = loaded.danChartLookup,
                 filters = activeFilters,
                 sort = activeSorting.field,
                 sortOrder = activeSorting.order,
@@ -94,10 +96,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { repository.load() } }
-                .onSuccess { loaded ->
-                    snapshot.value = LoadedCatalog(loaded.charts, loaded.options, loaded.info)
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val loaded = repository.load()
+                    LoadedCatalog(
+                        charts = loaded.charts,
+                        options = loaded.options,
+                        info = loaded.info,
+                        danChartLookup = DanCourseMetadata.chartLookup(loaded.charts),
+                    )
                 }
+            }.onSuccess { loaded ->
+                snapshot.value = loaded
+            }
                 .onFailure { failure -> error.value = failure.message ?: "Unable to load catalog" }
         }
         viewModelScope.launch {
@@ -185,8 +196,9 @@ data class CatalogUiState(
     val isLoading: Boolean = false,
     val charts: List<SongChart> = emptyList(),
     val allCharts: List<SongChart> = emptyList(),
+    val danChartLookup: Map<String, SongChart> = emptyMap(),
     val filters: ChartFilters = ChartFilters(),
-    val sort: ChartSort = ChartSort.CONSTANT,
+    val sort: ChartSort = ChartSort.LEVEL,
     val sortOrder: SortOrder = SortOrder.DESCENDING,
     val options: FilterOptions = FilterOptions(),
     val info: CatalogInfo? = null,
@@ -204,9 +216,10 @@ private data class LoadedCatalog(
     val charts: List<SongChart>,
     val options: FilterOptions,
     val info: CatalogInfo,
+    val danChartLookup: Map<String, SongChart>,
 )
 private data class Sorting(
-    val field: ChartSort = ChartSort.CONSTANT,
+    val field: ChartSort = ChartSort.LEVEL,
     val order: SortOrder = SortOrder.DESCENDING,
 )
 private data class PlayerData(
@@ -264,15 +277,6 @@ internal fun filterAndSort(
 
     val ascending = sortOrder == SortOrder.ASCENDING
     val comparator: Comparator<SongChart> = when (sort) {
-        ChartSort.CONSTANT -> if (ascending) {
-            compareBy<SongChart> { it.constant ?: Double.POSITIVE_INFINITY }
-                .thenBy { it.title.lowercase() }
-                .thenBy { it.difficulty }
-        } else {
-            compareByDescending<SongChart> { it.constant ?: Double.NEGATIVE_INFINITY }
-                .thenBy { it.title.lowercase() }
-                .thenBy { it.difficulty }
-        }
         ChartSort.LEVEL -> if (ascending) {
             compareBy<SongChart> { it.effectiveLevel ?: Double.POSITIVE_INFINITY }
                 .thenBy { it.title.lowercase() }
@@ -312,6 +316,13 @@ internal fun filterAndSort(
         } else {
             compareByDescending<SongChart> { scores[it.chartKey]?.grade?.threshold ?: Double.NEGATIVE_INFINITY }
                 .thenByDescending { scores[it.chartKey]?.achievement ?: Double.NEGATIVE_INFINITY }
+                .thenBy { it.title.lowercase() }
+        }
+        ChartSort.DX_SCORE -> if (ascending) {
+            compareBy<SongChart> { scores[it.chartKey]?.dxScore ?: Int.MAX_VALUE }
+                .thenBy { it.title.lowercase() }
+        } else {
+            compareByDescending<SongChart> { scores[it.chartKey]?.dxScore ?: Int.MIN_VALUE }
                 .thenBy { it.title.lowercase() }
         }
         ChartSort.RELEASE -> if (ascending) {
