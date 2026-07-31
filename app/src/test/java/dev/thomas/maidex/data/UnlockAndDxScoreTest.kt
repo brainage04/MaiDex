@@ -28,6 +28,16 @@ class UnlockAndDxScoreTest {
     }
 
     @Test
+    fun `Latent Kingdom is marked as a former class battle unlock`() {
+        val info = UnlockMetadata.forSong("Latent Kingdom").single()
+
+        assertEquals("Former class battle unlock", info.label)
+        assertTrue(info.summary.contains("now available by default"))
+        assertTrue(info.details.contains("no longer requires a class-battle unlock"))
+        assertEquals("class-buddies", info.guideEntryId)
+    }
+
+    @Test
     fun `songs without curated unlock requirements remain unmarked`() {
         assertTrue(UnlockMetadata.forSong("PANDORA PARADOXXX").isEmpty())
         assertFalse(UnlockMetadata.forSong("Sky Trails").isEmpty())

@@ -233,6 +233,18 @@ internal object UnlockMetadata {
                 ),
             ),
         )
+        put(
+            "Latent Kingdom",
+            listOf(
+                SongUnlockInfo(
+                    label = "Former class battle unlock",
+                    summary = "BUDDiES Gift Song · now available by default",
+                    details = "Originally unlocked through the BUDDiES Friend Matching class battle. It became available by default after the BUDDiES PLUS version update and no longer requires a class-battle unlock.",
+                    sourceUrl = FRIEND_MATCHING_SOURCE,
+                    guideEntryId = "class-buddies",
+                ),
+            ),
+        )
     }
 
     fun forSong(sourceSongId: String): List<SongUnlockInfo> = bySourceSongId[sourceSongId].orEmpty()

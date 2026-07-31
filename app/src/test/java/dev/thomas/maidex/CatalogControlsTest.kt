@@ -97,6 +97,7 @@ class CatalogControlsTest {
             "Daredevil Glaive",
             titleWithRomanization("Daredevil Glaive", "Daredevil Glaive"),
         )
+        assertEquals("削除 (sakujo)", titleWithRomanization("削除", "sakujo"))
         assertEquals("(no title)", titleWithRomanization("\u3000", "(no title)"))
     }
 

@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MilitaryTech
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Search
@@ -62,6 +63,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -73,6 +75,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,6 +95,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -104,6 +108,8 @@ import dev.thomas.maidex.CatalogUiState
 import dev.thomas.maidex.ImportStatus
 import dev.thomas.maidex.MainViewModel
 import dev.thomas.maidex.data.AccountRegion
+import dev.thomas.maidex.data.BestScore
+import dev.thomas.maidex.data.BestScoreMetric
 import dev.thomas.maidex.data.CatalogInfo
 import dev.thomas.maidex.data.DanCourse
 import dev.thomas.maidex.data.DanCourseGroup
@@ -113,6 +119,7 @@ import dev.thomas.maidex.data.ChartFilters
 import dev.thomas.maidex.data.ChartSort
 import dev.thomas.maidex.data.ComboMedal
 import dev.thomas.maidex.data.FilterOptions
+import dev.thomas.maidex.data.MedalLevelTable
 import dev.thomas.maidex.data.SongChart
 import dev.thomas.maidex.data.SongUnlockInfo
 import dev.thomas.maidex.data.UnlockGuideEntry
@@ -123,6 +130,8 @@ import dev.thomas.maidex.data.Grade
 import dev.thomas.maidex.data.JudgeCounts
 import dev.thomas.maidex.data.PlayDetail
 import dev.thomas.maidex.data.PlayerProfile
+import dev.thomas.maidex.data.ScoreAnalytics
+import dev.thomas.maidex.data.ScoreAnalyticsSummary
 import java.util.Locale
 import dev.thomas.maidex.data.SortOrder
 import dev.thomas.maidex.data.SyncMedal
@@ -140,6 +149,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
     var showAccount by remember { mutableStateOf(false) }
     var showUnlockGuide by remember { mutableStateOf(false) }
     var showDanGuide by remember { mutableStateOf(false) }
+    var showScoreStats by remember { mutableStateOf(false) }
     var selectedUnlockGuideEntryId by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
@@ -196,8 +206,8 @@ fun MaiDexApp(viewModel: MainViewModel) {
                         if (state.filters.activeCount > 0) {
                             Badge(
                                 modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .offset(x = (-2).dp, y = 2.dp)
+                                    .align(Alignment.CenterEnd)
+                                    .offset(x = (-2).dp, y = (-6).dp)
                                     .size(20.dp),
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -279,10 +289,26 @@ fun MaiDexApp(viewModel: MainViewModel) {
         AccountDialog(
             profile = state.profile,
             importStatus = state.importStatus,
+            hasScores = state.scores.isNotEmpty(),
             onImport = viewModel::importAccount,
             onClear = viewModel::clearAccount,
             onDismissStatus = viewModel::dismissImportStatus,
+            onScoreStats = {
+                showAccount = false
+                showScoreStats = true
+            },
             onDismiss = { showAccount = false },
+        )
+    }
+    if (showScoreStats) {
+        ScoreStatsDialog(
+            charts = state.allCharts,
+            scores = state.scores,
+            onDismiss = { showScoreStats = false },
+            onChart = { chart ->
+                showScoreStats = false
+                selectedChart = chart
+            },
         )
     }
     if (showUnlockGuide) {
@@ -444,7 +470,7 @@ private fun CatalogContent(
             onValueChange = onSearch,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(start = 12.dp, top = 4.dp, end = 12.dp),
             singleLine = true,
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             trailingIcon = {
@@ -457,10 +483,11 @@ private fun CatalogContent(
             label = { Text("Find a chart constant") },
             placeholder = { Text("Title, romaji, artist, or notes designer") },
         )
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 40.dp) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             SortMenu(
@@ -503,7 +530,8 @@ private fun CatalogContent(
                 }
             }
         }
-        Spacer(Modifier.height(4.dp))
+        }
+        Spacer(Modifier.height(2.dp))
         if (state.charts.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -629,7 +657,7 @@ private fun ChartCard(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    chart.artist,
+                    titleWithRomanization(chart.artist, chart.artistRomanized),
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1504,10 +1532,12 @@ private fun <T> MultiSelectSection(
 @Composable
 private fun AccountDialog(
     profile: PlayerProfile?,
+    hasScores: Boolean,
     importStatus: ImportStatus,
     onImport: (AccountRegion) -> Unit,
     onClear: () -> Unit,
     onDismissStatus: () -> Unit,
+    onScoreStats: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var region by remember(profile) { mutableStateOf(profile?.region ?: AccountRegion.INTERNATIONAL) }
@@ -1543,6 +1573,11 @@ private fun AccountDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                    if (profile != null && hasScores) {
+                        IconButton(onClick = onScoreStats) {
+                            Icon(Icons.Default.BarChart, contentDescription = "Score stats")
+                        }
                     }
                     TextButton(onClick = {
                         onDismissStatus()
@@ -1705,6 +1740,264 @@ private fun AccountDialog(
             onDismiss = { showProfileCloseUp = false },
         )
     }
+}
+
+@Composable
+private fun ScoreStatsDialog(
+    charts: List<SongChart>,
+    scores: Map<String, UserScore>,
+    onDismiss: () -> Unit,
+    onChart: (SongChart) -> Unit,
+) {
+    val summary = remember(charts, scores) { ScoreAnalytics.summarize(charts, scores) }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.96f)
+                .fillMaxHeight(0.94f),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Score stats",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Black,
+                        )
+                        Text(
+                            "${summary.playedCharts} matched scores · exact best medals",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = onDismiss) { Text("Close") }
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 10.dp,
+                        end = 10.dp,
+                        bottom = 18.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    item(key = "bests") {
+                        BestScoresCard(summary, onChart)
+                    }
+                    item(key = "high-levels") {
+                        MedalTableCard(summary.highLevels)
+                    }
+                    item(key = "lower-levels") {
+                        MedalTableCard(summary.lowerLevels)
+                    }
+                    item(key = "utage-levels") {
+                        MedalTableCard(
+                            table = summary.utage,
+                            note = "UTAGE uses estimated levels from the catalog; * means unrated.",
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BestScoresCard(
+    summary: ScoreAnalyticsSummary,
+    onChart: (SongChart) -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Text("Personal bests", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            summary.bestScores.forEach { best ->
+                BestScoreRow(best, onChart)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BestScoreRow(
+    best: BestScore,
+    onChart: (SongChart) -> Unit,
+) {
+    val chart = best.chart
+    val score = best.score
+    val modifier = if (chart == null) {
+        Modifier
+    } else {
+        Modifier.clickable { onChart(chart) }
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            best.metric.label.removePrefix("Best ").uppercase(Locale.ROOT),
+            modifier = Modifier.width(72.dp),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        if (chart == null || score == null) {
+            Text(
+                "No matching score",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@Row
+        }
+        AsyncImage(
+            model = chart.imageUrl,
+            contentDescription = null,
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(7.dp)),
+            contentScale = ContentScale.Crop,
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                titleWithRomanization(chart.title, chart.titleRomanized),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "${chart.displayDifficulty} ${chart.level.orEmpty()} · ${bestScoreValue(best.metric, score)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun bestScoreValue(metric: BestScoreMetric, score: UserScore): String =
+    if (metric == BestScoreMetric.DX_SCORE) {
+        val percentage = score.dxScorePercentage
+        if (percentage == null) "${score.dxScore}/${score.maxDxScore}"
+        else "${String.format(Locale.US, "%.2f", percentage)}% · ${score.dxScore}/${score.maxDxScore}"
+    } else {
+        "${String.format(Locale.US, "%.4f", score.achievement)}%"
+    }
+
+@Composable
+private fun MedalTableCard(
+    table: MedalLevelTable,
+    note: String? = null,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(Modifier.padding(vertical = 10.dp)) {
+            Text(
+                table.title,
+                modifier = Modifier.padding(horizontal = 12.dp),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "Counts are exact; higher medals are not counted again in lower rows.",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.width(48.dp))
+                    table.levels.forEach { level ->
+                        Text(
+                            level,
+                            modifier = Modifier.width(36.dp),
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Black,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(3.dp))
+                table.rows.forEachIndexed { index, row ->
+                    if (index == 4) Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(medalRowColor(row.label)),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            row.label,
+                            modifier = Modifier
+                                .width(48.dp)
+                                .padding(start = 6.dp, top = 4.dp, bottom = 4.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Black,
+                            color = medalLabelColor(row.label),
+                        )
+                        row.counts.forEach { count ->
+                            Text(
+                                count.takeIf { it > 0 }?.toString() ?: "·",
+                                modifier = Modifier.width(36.dp),
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(2.dp))
+                }
+            }
+            note?.let {
+                Text(
+                    it,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+private fun medalRowColor(label: String): Color = when (label) {
+    "FC", "FC+" -> Color(0xFFE6F1FF)
+    "AP", "AP+" -> Color(0xFFFFF0D8)
+    "FS", "FS+" -> Color(0xFFE0F7F4)
+    else -> Color(0xFFF2E8FF)
+}
+
+private fun medalLabelColor(label: String): Color = when (label) {
+    "FC", "FC+" -> Color(0xFF086AA7)
+    "AP", "AP+" -> Color(0xFFA65A00)
+    "FS", "FS+" -> Color(0xFF00796B)
+    else -> Color(0xFF6A36A8)
 }
 
 @Composable
@@ -2057,10 +2350,7 @@ private fun ChartDetailDialog(
                     fontWeight = FontWeight.Black,
                 )
                 Spacer(Modifier.height(12.dp))
-                DetailRow("Artist", chart.artist)
-                if (!chart.artistRomanized.equals(chart.artist, ignoreCase = true)) {
-                    DetailRow("Romanised artist", chart.artistRomanized)
-                }
+                DetailRow("Artist", titleWithRomanization(chart.artist, chart.artistRomanized))
                 DetailRow("Category", chart.category)
                 DetailRow("BPM", chart.bpm?.toString() ?: "Unknown")
                 DetailRow(
@@ -2102,10 +2392,10 @@ private fun ChartDetailDialog(
                     Text(chart.displayType)
                 }
                 DetailRow("Chart version", chart.chartVersion.orEmpty())
-                DetailRow("Notes designer", chart.noteDesigner.orEmpty())
-                if (!chart.noteDesignerRomanized.equals(chart.noteDesigner, ignoreCase = true)) {
-                    DetailRow("Romanised designer", chart.noteDesignerRomanized)
-                }
+                DetailRow(
+                    "Notes designer",
+                    titleWithRomanization(chart.noteDesigner.orEmpty(), chart.noteDesignerRomanized),
+                )
                 DetailRow("Regions", chart.regions.codes().joinToString { regionLabel(it) })
                 Spacer(Modifier.height(8.dp))
                 NoteCountTable(chart)
