@@ -1591,6 +1591,7 @@ private fun NoteCountTable(chart: SongChart) {
 }
 
 internal fun titleWithRomanization(original: String, romanized: String): String {
+    if (original.isBlank()) return romanized
     if (romanized.isBlank() || romanized.equals(original, ignoreCase = true)) return original
     var offset = 0
     while (offset < original.length) {

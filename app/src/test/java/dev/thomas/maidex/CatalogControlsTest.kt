@@ -7,6 +7,7 @@ import dev.thomas.maidex.data.NoteCounts
 import dev.thomas.maidex.data.Regions
 import dev.thomas.maidex.data.SongChart
 import dev.thomas.maidex.data.SortOrder
+import dev.thomas.maidex.ui.titleWithRomanization
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -60,6 +61,19 @@ class CatalogControlsTest {
         assertEquals(4, titles(ConstantAvailability.BOTH).size)
         assertEquals(listOf("Known high", "Known low", "UTAGE"), titles(ConstantAvailability.KNOWN))
         assertEquals(listOf("Unknown"), titles(ConstantAvailability.UNKNOWN))
+    }
+
+    @Test
+    fun `title formatting shows SilentBlue romanisation without duplicating Latin titles`() {
+        assertEquals(
+            "零號車輛 (Linghao cheliang)",
+            titleWithRomanization("零號車輛", "Linghao cheliang"),
+        )
+        assertEquals(
+            "Daredevil Glaive",
+            titleWithRomanization("Daredevil Glaive", "Daredevil Glaive"),
+        )
+        assertEquals("(no title)", titleWithRomanization("\u3000", "(no title)"))
     }
 
     private fun chart(

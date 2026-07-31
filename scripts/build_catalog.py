@@ -16,6 +16,7 @@ from pykakasi import kakasi
 SOURCE_URL = "https://dp4p6x0xfi5o9.cloudfront.net/maimai/data.json"
 IMAGE_BASE_URL = "https://dp4p6x0xfi5o9.cloudfront.net/maimai/img/cover"
 ALIASES_SOURCE_URL = "https://github.com/lomotos10/GCM-bot/blob/master/data/aliases/en/maimai.tsv"
+ROMANISATIONS_SOURCE_URL = "https://silentblue.remywiki.com/Category:maimai_Songs"
 
 
 
@@ -56,7 +57,28 @@ def load_aliases(path: Path) -> dict[str, list[str]]:
     return aliases
 
 
-def create_database(catalog: dict, aliases: dict[str, list[str]], destination: Path) -> None:
+def load_romanisations(path: Path) -> dict[str, str]:
+    romanisations: dict[str, str] = {}
+    with path.open(encoding="utf-8") as romanisation_file:
+        for line_number, line in enumerate(romanisation_file, start=1):
+            if not line.strip() or line.startswith("# "):
+                continue
+            values = line.rstrip("\n").split("\t")
+            if len(values) < 3:
+                raise ValueError(f"{path}:{line_number}: expected at least three tab-separated columns")
+            source_id, _, page_title = values[:3]
+            if source_id in romanisations:
+                raise ValueError(f"{path}:{line_number}: duplicate source ID {source_id!r}")
+            romanisations[source_id] = page_title
+    return romanisations
+
+
+def create_database(
+    catalog: dict,
+    aliases: dict[str, list[str]],
+    romanisations: dict[str, str],
+    destination: Path,
+) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.unlink(missing_ok=True)
     romanize = romanizer()
@@ -128,6 +150,7 @@ def create_database(catalog: dict, aliases: dict[str, list[str]], destination: P
         [
             ("source_url", SOURCE_URL),
             ("aliases_source_url", ALIASES_SOURCE_URL),
+            ("romanisations_source_url", ROMANISATIONS_SOURCE_URL),
             ("catalog_update_time", catalog.get("updateTime", "")),
             ("song_count", str(len(catalog["songs"]))),
             ("chart_count", str(sum(len(song["sheets"]) for song in catalog["songs"]))),
@@ -139,19 +162,36 @@ def create_database(catalog: dict, aliases: dict[str, list[str]], destination: P
         ],
     )
 
+    missing_romanisations = [
+        song["songId"] for song in catalog["songs"] if song["songId"] not in romanisations
+    ]
+    if missing_romanisations:
+        preview = ", ".join(repr(value) for value in missing_romanisations[:5])
+        raise ValueError(
+            f"SilentBlue romanisation audit is missing {len(missing_romanisations)} songs: {preview}"
+        )
+
     song_rows = []
     chart_rows = []
     for song_id, song in enumerate(catalog["songs"], start=1):
         title = song.get("title") or song["songId"]
         artist = song.get("artist") or ""
-        title_aliases = aliases.get(title, [])
+        title_aliases = list(aliases.get(title, []))
+        generated_title_romanisation = romanize(title)
+        title_romanisation = romanisations[song["songId"]]
+        if (
+            generated_title_romanisation
+            and generated_title_romanisation != title_romanisation
+            and generated_title_romanisation not in title_aliases
+        ):
+            title_aliases.append(generated_title_romanisation)
         song_rows.append(
             (
                 song_id,
                 song["songId"],
                 song.get("category") or "",
                 title,
-                title_aliases[0] if title_aliases else romanize(title),
+                title_romanisation,
                 "\u001e".join(title_aliases),
                 artist,
                 romanize(artist),
@@ -234,8 +274,18 @@ def main() -> None:
         type=Path,
         default=Path("data/maimai_aliases.tsv"),
     )
+    parser.add_argument(
+        "--romanisations",
+        type=Path,
+        default=Path("data/silentblue_romanisations.tsv"),
+    )
     args = parser.parse_args()
-    create_database(fetch_catalog(args.source), load_aliases(args.aliases), args.output)
+    create_database(
+        fetch_catalog(args.source),
+        load_aliases(args.aliases),
+        load_romanisations(args.romanisations),
+        args.output,
+    )
 
 
 if __name__ == "__main__":

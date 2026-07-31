@@ -24,49 +24,49 @@ internal object UnlockMetadata {
         AreaGroup(
             "chiho-paradigm-reboot",
             "Paradigm: Rebootちほー",
-            "Paradigm: Reboot Chiho",
+            "Paradigm: Reboot Area",
             songs("零號車輛"),
         ),
         AreaGroup(
             "chiho-tricoro",
             "トリコロちほー",
-            "Tricoro Chiho",
+            "Tricolo Area",
             songs("Magical Paradox", "殿ッ！？ご乱心！？"),
         ),
         AreaGroup(
             "chiho-feat-contest",
             "FEAT CONTESTちほー",
-            "FEAT CONTEST Chiho",
+            "FEAT CONTEST Area",
             songs("拝啓、最高の思い出たち", "おべんきょうたいむ", "るろうらんる"),
         ),
         AreaGroup(
             "chiho-kawaii-2",
             "kawaiiちほー2",
-            "kawaii Chiho 2",
+            "kawaii Area 2",
             songs("真空都市", "Eternal Return", "ぱぱぱらビーチ", "Get U ♭ack"),
         ),
         AreaGroup(
             "chiho-cosmo-2",
             "cosMo＠暴走Pちほー2",
-            "cosMo@Bousou-P Chiho 2",
+            "cosMo@Bousou-P Area 2",
             songs("ラストピースに祝福と栄光を"),
         ),
         AreaGroup(
             "chiho-takamagahara-2",
             "高天原ちほー2",
-            "Takamagahara Chiho 2",
+            "Takamagahara Area 2",
             songs("ミクマリ", "雲外蒼電 -Dreaming Voltage-", "鬼女紅妖", "華天月兎"),
         ),
         AreaGroup(
             "chiho-sky-street-7",
             "スカイストリートちほー7",
-            "Sky Street Chiho 7",
+            "Sky Street Area 7",
             songs("スローグロー", "ECHO,", "Phase: Theatre", "Sky Trails"),
         ),
         AreaGroup(
             "chiho-ongeki-9",
             "オンゲキちほー9",
-            "ONGEKI Chiho 9",
+            "ONGEKI Area 9",
             listOf(
                 UnlockGuideSong("ICEBURN", "Progress through the area"),
                 UnlockGuideSong("Daredevil Glaive", "Reach 525 km"),
@@ -75,7 +75,7 @@ internal object UnlockMetadata {
         AreaGroup(
             "chiho-tricoro-2",
             "トリコロちほー2",
-            "Tricoro Chiho 2",
+            "Tricolo Area 2",
             listOf(UnlockGuideSong("ソテリア", "Final-track Perfect Challenge")),
         ),
     )
