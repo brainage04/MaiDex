@@ -89,6 +89,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -1522,10 +1523,8 @@ private fun AccountDialog(
                         enabled = !isImporting,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Icon(Icons.Default.Sync, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
                         Text(
-                            if (profile == null) "Import scores" else "Refresh scores",
+                            if (profile == null) "Import scores" else "Refresh",
                             maxLines = 1,
                         )
                     }
@@ -1611,9 +1610,11 @@ private fun DxNetProfileCard(
                                         profile.name,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        fontSize = 10.sp,
-                                        lineHeight = 10.sp,
-                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 12.sp,
+                                        lineHeight = 12.sp,
+                                        fontFamily = FontFamily.SansSerif,
+                                        fontWeight = FontWeight.Normal,
+                                        letterSpacing = 0.sp,
                                         color = Color(0xFF111111),
                                     )
                                 }
@@ -1661,7 +1662,7 @@ private fun DxNetProfileCard(
                                     modifier = Modifier.size(width = 45.dp, height = 25.dp),
                                 )
                             }
-                            Spacer(Modifier.weight(1f))
+                            Spacer(Modifier.width(10.dp))
                             profile.starCount?.let { stars ->
                                 AsyncImage(
                                     model = profile.starIconUrl,
@@ -1675,7 +1676,9 @@ private fun DxNetProfileCard(
                                     maxLines = 1,
                                     fontSize = 13.sp,
                                     lineHeight = 13.sp,
-                                    fontWeight = FontWeight.Medium,
+                                    fontFamily = FontFamily.SansSerif,
+                                    fontWeight = FontWeight.Normal,
+                                    letterSpacing = 0.sp,
                                     color = Color(0xFF202020),
                                 )
                             }
@@ -1707,9 +1710,11 @@ private fun DxNetTitleBadge(title: String, imageUrl: String) {
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelMedium.copy(
                 color = Color.Black,
-                fontSize = 10.sp,
-                lineHeight = 10.sp,
-                fontWeight = FontWeight.Black,
+                fontSize = 11.sp,
+                lineHeight = 11.sp,
+                fontFamily = FontFamily.SansSerif,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.sp,
                 drawStyle = Stroke(width = 2f),
             ),
         )
@@ -1719,9 +1724,11 @@ private fun DxNetTitleBadge(title: String, imageUrl: String) {
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelMedium.copy(
                 color = Color.White,
-                fontSize = 10.sp,
-                lineHeight = 10.sp,
-                fontWeight = FontWeight.Black,
+                fontSize = 11.sp,
+                lineHeight = 11.sp,
+                fontFamily = FontFamily.SansSerif,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.sp,
             ),
         )
     }
@@ -1773,9 +1780,11 @@ private fun DxRatingBadge(rating: Int, imageUrl: String) {
             rating.toString(),
             modifier = Modifier.padding(end = 6.dp),
             color = Color.White,
+            fontFamily = FontFamily.SansSerif,
             fontWeight = FontWeight.Bold,
             fontSize = 13.sp,
             lineHeight = 13.sp,
+            letterSpacing = 0.sp,
             textAlign = androidx.compose.ui.text.style.TextAlign.End,
         )
     }
