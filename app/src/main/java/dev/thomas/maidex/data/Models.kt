@@ -39,6 +39,7 @@ data class UnlockGuideEntry(
     val id: String,
     val section: UnlockGuideSection,
     val title: String,
+    val titleRomanized: String = "",
     val subtitle: String,
     val details: String,
     val songs: List<UnlockGuideSong>,

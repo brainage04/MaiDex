@@ -10,6 +10,7 @@ internal object UnlockMetadata {
     private data class AreaGroup(
         val id: String,
         val name: String,
+        val nameRomanized: String,
         val songs: List<UnlockGuideSong>,
     )
 
@@ -20,32 +21,52 @@ internal object UnlockMetadata {
     )
 
     private val areaGroups = listOf(
-        AreaGroup("chiho-paradigm-reboot", "Paradigm: Reboot Chiho", songs("零號車輛")),
-        AreaGroup("chiho-tricoro", "Tricoro Chiho", songs("Magical Paradox", "殿ッ！？ご乱心！？")),
+        AreaGroup(
+            "chiho-paradigm-reboot",
+            "Paradigm: Rebootちほー",
+            "Paradigm: Reboot Chiho",
+            songs("零號車輛"),
+        ),
+        AreaGroup(
+            "chiho-tricoro",
+            "トリコロちほー",
+            "Tricoro Chiho",
+            songs("Magical Paradox", "殿ッ！？ご乱心！？"),
+        ),
         AreaGroup(
             "chiho-feat-contest",
+            "FEAT CONTESTちほー",
             "FEAT CONTEST Chiho",
             songs("拝啓、最高の思い出たち", "おべんきょうたいむ", "るろうらんる"),
         ),
         AreaGroup(
             "chiho-kawaii-2",
+            "kawaiiちほー2",
             "kawaii Chiho 2",
             songs("真空都市", "Eternal Return", "ぱぱぱらビーチ", "Get U ♭ack"),
         ),
-        AreaGroup("chiho-cosmo-2", "cosMo@Bousou-P Chiho 2", songs("ラストピースに祝福と栄光を")),
+        AreaGroup(
+            "chiho-cosmo-2",
+            "cosMo＠暴走Pちほー2",
+            "cosMo@Bousou-P Chiho 2",
+            songs("ラストピースに祝福と栄光を"),
+        ),
         AreaGroup(
             "chiho-takamagahara-2",
+            "高天原ちほー2",
             "Takamagahara Chiho 2",
             songs("ミクマリ", "雲外蒼電 -Dreaming Voltage-", "鬼女紅妖", "華天月兎"),
         ),
         AreaGroup(
             "chiho-sky-street-7",
+            "スカイストリートちほー7",
             "Sky Street Chiho 7",
             songs("スローグロー", "ECHO,", "Phase: Theatre", "Sky Trails"),
         ),
         AreaGroup(
             "chiho-ongeki-9",
-            "ONGEKI Area 9",
+            "オンゲキちほー9",
+            "ONGEKI Chiho 9",
             listOf(
                 UnlockGuideSong("ICEBURN", "Progress through the area"),
                 UnlockGuideSong("Daredevil Glaive", "Reach 525 km"),
@@ -53,6 +74,7 @@ internal object UnlockMetadata {
         ),
         AreaGroup(
             "chiho-tricoro-2",
+            "トリコロちほー2",
             "Tricoro Chiho 2",
             listOf(UnlockGuideSong("ソテリア", "Final-track Perfect Challenge")),
         ),
@@ -97,6 +119,7 @@ internal object UnlockMetadata {
                 id = area.id,
                 section = UnlockGuideSection.CHIHOS,
                 title = area.name,
+                titleRomanized = area.nameRomanized,
                 subtitle = "${area.songs.size} unlock ${if (area.songs.size == 1) "song" else "songs"}",
                 details = "International area progression. Final tracks may use a life-mode Perfect Challenge whose Life allowance relaxes over time.",
                 songs = area.songs,
@@ -107,6 +130,7 @@ internal object UnlockMetadata {
                 id = battle.id,
                 section = UnlockGuideSection.CLASS_BATTLES,
                 title = battle.version,
+                titleRomanized = battle.version,
                 subtitle = "Conduction / Gift ${if (battle.songs.size == 1) "Song" else "Songs"}",
                 details = "Defeat the final Friend Matching class boss and reach LEGEND, or play with a LEGEND-class conductor. A previous version's Gift Song becomes available by default after the next version update.",
                 songs = battle.songs,
@@ -118,8 +142,8 @@ internal object UnlockMetadata {
         areaGroups.forEach { area ->
             val info = SongUnlockInfo(
                 label = "Chiho unlock",
-                summary = area.name,
-                details = "International: progress through ${area.name} to unlock this song for regular play.",
+                summary = area.displayName,
+                details = "International: progress through ${area.displayName} to unlock this song for regular play.",
                 sourceUrl = CIRCLE_ASIA_SOURCE,
                 guideEntryId = area.id,
             )
@@ -145,31 +169,31 @@ internal object UnlockMetadata {
 
         perfectChallenge(
             song = "殿ッ！？ご乱心！？",
-            area = "Tricoro Chiho",
+            area = "トリコロちほー (Tricoro Chiho)",
             guideEntryId = "chiho-tricoro",
             internationalDate = "2026-01-22",
         )
         perfectChallenge(
             song = "るろうらんる",
-            area = "FEAT CONTEST Chiho",
+            area = "FEAT CONTESTちほー (FEAT CONTEST Chiho)",
             guideEntryId = "chiho-feat-contest",
             internationalDate = "2026-02-13",
         )
         perfectChallenge(
             song = "Get U ♭ack",
-            area = "kawaii Chiho 2",
+            area = "kawaiiちほー2 (kawaii Chiho 2)",
             guideEntryId = "chiho-kawaii-2",
             internationalDate = "2026-03-19",
         )
         perfectChallenge(
             song = "華天月兎",
-            area = "Takamagahara Chiho 2",
+            area = "高天原ちほー2 (Takamagahara Chiho 2)",
             guideEntryId = "chiho-takamagahara-2",
             internationalDate = "2026-05-01",
         )
         perfectChallenge(
             song = "Sky Trails",
-            area = "Sky Street Chiho 7",
+            area = "スカイストリートちほー7 (Sky Street Chiho 7)",
             guideEntryId = "chiho-sky-street-7",
             internationalDate = "2026-06-12",
         )
@@ -178,7 +202,7 @@ internal object UnlockMetadata {
             listOf(
                 SongUnlockInfo(
                     label = "Perfect Challenge",
-                    summary = "Tricoro Chiho 2 final track",
+                    summary = "トリコロちほー2 (Tricoro Chiho 2) final track",
                     details = "International CiRCLE PLUS: available from 2026-07-23. Clear the life-mode Perfect Challenge to unlock regular play. Each non-Perfect judgement costs 1 Life; the allowance relaxes over time.",
                     sourceUrl = PERFECT_CHALLENGE_SOURCE,
                     guideEntryId = "chiho-tricoro-2",
@@ -190,8 +214,8 @@ internal object UnlockMetadata {
             listOf(
                 SongUnlockInfo(
                     label = "Chiho unlock",
-                    summary = "ONGEKI Area 9 · 525 km",
-                    details = "International CiRCLE: available from 2026-07-10. Reach a total distance of 525 km in ONGEKI Area 9 to unlock it permanently. Daredevil Glaive is not the area's Perfect Challenge track.",
+                    summary = "オンゲキちほー9 (ONGEKI Chiho 9) · 525 km",
+                    details = "International CiRCLE: available from 2026-07-10. Reach a total distance of 525 km in オンゲキちほー9 (ONGEKI Chiho 9) to unlock it permanently. Daredevil Glaive is not the area's Perfect Challenge track.",
                     sourceUrl = DAREDEVIL_SOURCE,
                     guideEntryId = "chiho-ongeki-9",
                 ),
@@ -234,6 +258,9 @@ internal object UnlockMetadata {
             ),
         )
     }
+    private val AreaGroup.displayName: String
+        get() = "$name ($nameRomanized)"
+
 
     private fun songs(vararg titles: String): List<UnlockGuideSong> =
         titles.map(::UnlockGuideSong)

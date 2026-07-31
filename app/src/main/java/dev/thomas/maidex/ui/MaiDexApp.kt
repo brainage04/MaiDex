@@ -259,6 +259,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
     if (showUnlockGuide) {
         UnlockGuideDialog(
             initialEntryId = selectedUnlockGuideEntryId,
+            charts = state.allCharts,
             onDismiss = {
                 showUnlockGuide = false
                 selectedUnlockGuideEntryId = null
@@ -481,21 +482,10 @@ private fun ChartCard(
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    chart.title,
+                    titleWithRomanization(chart.title, chart.titleRomanized),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
                 )
-                if (!chart.titleRomanized.equals(chart.title, ignoreCase = true)) {
-                    Text(
-                        chart.titleRomanized,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
                 Text(
                     chart.artist,
                     style = MaterialTheme.typography.bodySmall,
@@ -708,6 +698,7 @@ private fun MedalPill(label: String, color: Color) {
 @Composable
 private fun UnlockGuideDialog(
     initialEntryId: String?,
+    charts: List<SongChart>,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -716,6 +707,9 @@ private fun UnlockGuideDialog(
     }
     var section by remember(initialEntryId) {
         mutableStateOf(initialEntry?.section ?: UnlockGuideSection.CHIHOS)
+    }
+    val romanizedTitles = remember(charts) {
+        charts.asSequence().associate { it.sourceSongId to it.titleRomanized }
     }
     val entries = UnlockMetadata.guideEntries.filter { it.section == section }
     val orderedEntries = if (initialEntry?.section == section) {
@@ -767,6 +761,7 @@ private fun UnlockGuideDialog(
                         UnlockGuideEntryCard(
                             entry = entry,
                             isLinkedEntry = entry.id == initialEntryId,
+                            romanizedTitles = romanizedTitles,
                             onOpenSource = {
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(entry.sourceUrl)))
                             },
@@ -782,6 +777,7 @@ private fun UnlockGuideDialog(
 private fun UnlockGuideEntryCard(
     entry: UnlockGuideEntry,
     isLinkedEntry: Boolean,
+    romanizedTitles: Map<String, String>,
     onOpenSource: () -> Unit,
 ) {
     Surface(
@@ -803,7 +799,11 @@ private fun UnlockGuideEntryCard(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            Text(entry.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                titleWithRomanization(entry.title, entry.titleRomanized),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
             Text(
                 entry.subtitle,
                 style = MaterialTheme.typography.labelMedium,
@@ -819,7 +819,11 @@ private fun UnlockGuideEntryCard(
                         .padding(vertical = 2.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("• ${song.title}", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "• ${titleWithRomanization(song.title, romanizedTitles[song.title].orEmpty())}",
+                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.SemiBold,
+                    )
                     if (song.requirement.isNotBlank()) {
                         Text(
                             song.requirement,
@@ -1243,10 +1247,11 @@ private fun ChartDetailDialog(
                     contentScale = ContentScale.Crop,
                 )
                 Spacer(Modifier.height(14.dp))
-                Text(chart.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                if (!chart.titleRomanized.equals(chart.title, ignoreCase = true)) {
-                    Text(chart.titleRomanized, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                Text(
+                    titleWithRomanization(chart.title, chart.titleRomanized),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Black,
+                )
                 Spacer(Modifier.height(12.dp))
                 DetailRow("Artist", chart.artist)
                 if (!chart.artistRomanized.equals(chart.artist, ignoreCase = true)) {
@@ -1583,6 +1588,22 @@ private fun NoteCountTable(chart: SongChart) {
             }
         }
     }
+}
+
+internal fun titleWithRomanization(original: String, romanized: String): String {
+    if (romanized.isBlank() || romanized.equals(original, ignoreCase = true)) return original
+    var offset = 0
+    while (offset < original.length) {
+        val codePoint = original.codePointAt(offset)
+        if (
+            Character.isLetter(codePoint) &&
+            Character.UnicodeScript.of(codePoint) != Character.UnicodeScript.LATIN
+        ) {
+            return "$original ($romanized)"
+        }
+        offset += Character.charCount(codePoint)
+    }
+    return original
 }
 
 private fun difficultyLabel(value: String): String = when (value) {
