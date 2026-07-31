@@ -252,6 +252,8 @@ internal fun extractPlayerProfile(
     val classRank = rankImages.firstOrNull { it.hasClass("p_l_10") }
         ?: rankImages.getOrNull(1)
     val starText = block.selectFirst(".p_l_10.f_l.f_14")?.text().orEmpty()
+    val avatar = block.selectFirst("img.w_112.f_l")
+        ?: block.selectFirst("""img[src*="/img/Icon/"]""")
 
     return PlayerProfile(
         name = name.ifBlank { "Player" },
@@ -260,7 +262,7 @@ internal fun extractPlayerProfile(
         title = block.selectFirst(".trophy_inner_block")?.text()?.trim().orEmpty(),
         titleRarity = titleRarity,
         starCount = parseInt(starText).takeIf { starText.isNotBlank() },
-        avatarUrl = block.selectFirst("img.w_112.f_l").imageUrl(),
+        avatarUrl = avatar.imageUrl(),
         courseRankUrl = courseRank.imageUrl(),
         classRankUrl = classRank.imageUrl(),
         importedAt = importedAt,

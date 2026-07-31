@@ -170,7 +170,15 @@ fun MaiDexApp(viewModel: MainViewModel) {
                         Icon(Icons.Default.Map, contentDescription = "Chiho and class battle guides")
                     }
                     IconButton(onClick = { showAccount = true }) {
-                        Icon(Icons.Default.AccountCircle, contentDescription = "DX NET account")
+                        val profile = state.profile
+                        if (profile?.avatarUrl.isNullOrBlank()) {
+                            Icon(Icons.Default.AccountCircle, contentDescription = "DX NET account")
+                        } else {
+                            DxNetAvatar(
+                                profile = profile,
+                                modifier = Modifier.size(32.dp),
+                            )
+                        }
                     }
                     IconButton(onClick = { showAbout = true }) {
                         Icon(Icons.Default.Info, contentDescription = "About catalog")

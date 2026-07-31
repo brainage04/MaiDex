@@ -38,7 +38,7 @@ class ProfileAssetCacheTest {
             officialRating = 16_070,
             region = AccountRegion.INTERNATIONAL,
             titleRarity = "Gold",
-            avatarUrl = "https://maimaidx-eng.com/maimai-mobile/img/avatar.png",
+            avatarUrl = "https://maimaidx-eng.com/maimai-mobile/img/Icon/c5f687e5d0da9696.png",
             courseRankUrl = "https://maimaidx-eng.com/maimai-mobile/img/course.png",
             classRankUrl = "https://maimaidx-eng.com/maimai-mobile/img/class.png",
         )

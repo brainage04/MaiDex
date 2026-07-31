@@ -56,4 +56,25 @@ class MaimaiDxClientTest {
         assertEquals(123L, profile.importedAt)
     }
 
+    @Test
+    fun `profile parser recognizes current Icon profile picture URLs`() {
+        val document = Jsoup.parse(
+            """
+            <div class="see_through_block">
+              <div class="name_block">Player</div>
+              <div class="rating_block">16000</div>
+              <img src="/maimai-mobile/img/Icon/c5f687e5d0da9696.png">
+            </div>
+            """.trimIndent(),
+            "https://maimaidx-eng.com/maimai-mobile/home/",
+        )
+
+        val profile = extractPlayerProfile(document, AccountRegion.INTERNATIONAL)!!
+
+        assertEquals(
+            "https://maimaidx-eng.com/maimai-mobile/img/Icon/c5f687e5d0da9696.png",
+            profile.avatarUrl,
+        )
+    }
+
 }
