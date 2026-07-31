@@ -57,6 +57,11 @@ class UserDataRepository(context: Context) {
             name = preferences.getString("name", "Player").orEmpty(),
             officialRating = preferences.getInt("rating", 0),
             region = enumValueOr(regionName, AccountRegion.INTERNATIONAL),
+            title = preferences.getString("title", "").orEmpty(),
+            starCount = preferences.getInt("star_count", -1).takeIf { it >= 0 },
+            avatarUrl = preferences.getString("avatar_url", "").orEmpty(),
+            courseRankUrl = preferences.getString("course_rank_url", "").orEmpty(),
+            classRankUrl = preferences.getString("class_rank_url", "").orEmpty(),
             importedAt = preferences.getLong("imported_at", 0L),
         )
     }
@@ -97,12 +102,18 @@ class UserDataRepository(context: Context) {
                 )
             }
         }
-        preferences.edit()
+        val editor = preferences.edit()
             .putString("name", result.profile.name)
             .putInt("rating", result.profile.officialRating)
             .putString("region", result.profile.region.name)
+            .putString("title", result.profile.title)
+            .putString("avatar_url", result.profile.avatarUrl)
+            .putString("course_rank_url", result.profile.courseRankUrl)
+            .putString("class_rank_url", result.profile.classRankUrl)
             .putLong("imported_at", result.profile.importedAt)
-            .apply()
+        result.profile.starCount?.let { editor.putInt("star_count", it) }
+            ?: editor.remove("star_count")
+        editor.apply()
     }
 
     fun clear() {

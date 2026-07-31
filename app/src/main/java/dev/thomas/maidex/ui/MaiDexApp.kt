@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -79,6 +80,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
@@ -1102,9 +1104,13 @@ private fun AccountDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("maimai DX NET", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text(
-                            "Official site sign-in; credentials never enter MaiDex",
+                            "maimai DX NET",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Black,
+                        )
+                        Text(
+                            "Official account data, stored only on this device",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1114,7 +1120,11 @@ private fun AccountDialog(
                         onDismiss()
                     }) { Text("Close") }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                Row(
+                    modifier = Modifier.padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     AccountRegion.entries.forEach { option ->
                         FilterChip(
                             selected = region == option,
@@ -1124,27 +1134,43 @@ private fun AccountDialog(
                         )
                     }
                 }
-                profile?.let {
+
+                if (profile != null) {
+                    DxNetProfileCard(
+                        profile = profile,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+                    )
+                } else {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 6.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(12.dp),
+                            .padding(top = 6.dp, bottom = 8.dp),
+                        color = Color(0xFFE5F6FD),
+                        border = BorderStroke(1.dp, Color(0xFF73C8E8)),
+                        shape = RoundedCornerShape(14.dp),
                     ) {
                         Row(
-                            modifier = Modifier.padding(10.dp),
+                            modifier = Modifier.padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(Icons.Default.AccountCircle, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(it.name, fontWeight = FontWeight.Bold)
-                                Text("Official rating ${it.officialRating} · ${it.region.label}")
+                            Icon(
+                                Icons.Default.AccountCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF087BA8),
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text("No DX NET profile imported", fontWeight = FontWeight.Bold)
+                                Text(
+                                    "Sign in, then import your scores.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
                         }
                     }
                 }
+
                 when (importStatus) {
                     is ImportStatus.Running -> Row(
                         modifier = Modifier.padding(vertical = 8.dp),
@@ -1167,18 +1193,27 @@ private fun AccountDialog(
                     )
                     ImportStatus.Idle -> Unit
                 }
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        "DX NET sign-in opens full screen so SNS login pages receive a full browser viewport. " +
-                            "MaiDex closes it automatically after DX NET confirms the login.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Text(
+                            "Sign-in opens the official DX NET site full screen. " +
+                                "MaiDex reads your profile and scores only after DX NET confirms the session.",
+                            modifier = Modifier.padding(14.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1190,7 +1225,7 @@ private fun AccountDialog(
                         enabled = !isImporting,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Open sign-in")
+                        Text("Sign in", maxLines = 1)
                     }
                     Button(
                         onClick = { onImport(region) },
@@ -1199,7 +1234,10 @@ private fun AccountDialog(
                     ) {
                         Icon(Icons.Default.Sync, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Import scores")
+                        Text(
+                            if (profile == null) "Import scores" else "Refresh scores",
+                            maxLines = 1,
+                        )
                     }
                 }
                 if (profile != null) {
@@ -1210,6 +1248,278 @@ private fun AccountDialog(
                     ) { Text("Remove imported account data") }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DxNetProfileCard(
+    profile: PlayerProfile,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFF54C6EF),
+        border = BorderStroke(2.dp, Color(0xFF126686)),
+        shadowElevation = 3.dp,
+    ) {
+        Box(
+            modifier = Modifier
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            Color(0xFF39B9EA),
+                            Color(0xFF8DDEFA),
+                            Color(0xFF48C4ED),
+                        ),
+                    ),
+                )
+                .padding(8.dp),
+        ) {
+            Surface(
+                color = Color(0xFFFCFEFF),
+                shape = RoundedCornerShape(11.dp),
+                border = BorderStroke(1.dp, Color(0xFF7D929D)),
+            ) {
+                Row(
+                    modifier = Modifier.padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    DxNetAvatar(profile)
+                    Spacer(Modifier.width(9.dp))
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(50),
+                            border = BorderStroke(1.dp, Color(0xFFF2A300)),
+                            color = Color.Transparent,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(
+                                                Color(0xFFFFC800),
+                                                Color(0xFFFFEB66),
+                                                Color(0xFFFFC400),
+                                            ),
+                                        ),
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    profile.title.ifBlank {
+                                        "DX NET profile · ${profile.region.label}"
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color(0xFF20252A),
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp),
+                                shape = RoundedCornerShape(7.dp),
+                                color = Color(0xFFFAFCFD),
+                                border = BorderStroke(1.dp, Color(0xFFCCD2D5)),
+                                shadowElevation = 1.dp,
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(horizontal = 9.dp),
+                                    contentAlignment = Alignment.CenterStart,
+                                ) {
+                                    Text(
+                                        profile.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.labelLarge.copy(fontSize = 10.sp),
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            DxRatingBadge(profile.officialRating)
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            profile.courseRankUrl.takeIf(String::isNotBlank)?.let {
+                                DxNetRankImage(it, "Course")
+                            }
+                            profile.classRankUrl.takeIf(String::isNotBlank)?.let {
+                                DxNetRankImage(it, "Class")
+                            }
+                            if (profile.starCount != null) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFFFF7D7),
+                                    border = BorderStroke(1.dp, Color(0xFFFFC64B)),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Star,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(21.dp),
+                                            tint = Color(0xFFF4A900),
+                                        )
+                                        Spacer(Modifier.width(2.dp))
+                                        Text(
+                                            "×${profile.starCount}",
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.labelLarge,
+                                        )
+                                    }
+                                }
+                            }
+                            if (
+                                profile.courseRankUrl.isBlank() &&
+                                profile.classRankUrl.isBlank() &&
+                                profile.starCount == null
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFE8F5FA),
+                                ) {
+                                    Text(
+                                        profile.region.label,
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF126686),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DxNetAvatar(profile: PlayerProfile) {
+    Surface(
+        modifier = Modifier.size(78.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = Color(0xFFE5F6FD),
+        border = BorderStroke(2.dp, Color(0xFF43BDE9)),
+        shadowElevation = 2.dp,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                Icons.Default.AccountCircle,
+                contentDescription = null,
+                modifier = Modifier.size(58.dp),
+                tint = Color(0xFF178AB6),
+            )
+            if (profile.avatarUrl.isNotBlank()) {
+                AsyncImage(
+                    model = profile.avatarUrl,
+                    contentDescription = "${profile.name}'s DX NET icon",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(width = 38.dp, height = 7.dp)
+                    .clip(RoundedCornerShape(bottomStart = 7.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color(0xFFFF5EAE), Color(0xFF7A5CFF)),
+                        ),
+                    ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DxRatingBadge(rating: Int) {
+    Surface(
+        modifier = Modifier
+            .width(80.dp)
+            .height(38.dp),
+        shape = RoundedCornerShape(7.dp),
+        color = Color(0xFF505A60),
+        border = BorderStroke(2.dp, Color(0xFF45D8E8)),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .height(38.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0xFFFFE544), Color(0xFFFF6C62)),
+                        ),
+                    )
+                    .padding(horizontal = 2.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "RATING",
+                    fontSize = 5.sp,
+                    lineHeight = 6.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color(0xFF1D2930),
+                )
+            }
+            Text(
+                rating.toString(),
+                modifier = Modifier.weight(1f),
+                color = Color.White,
+                fontWeight = FontWeight.Black,
+                fontSize = 13.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DxNetRankImage(url: String, fallbackLabel: String) {
+    Surface(
+        modifier = Modifier
+            .width(72.dp)
+            .height(36.dp),
+        shape = RoundedCornerShape(7.dp),
+        color = Color(0xFFF2F5F7),
+        border = BorderStroke(1.dp, Color(0xFFCBD3D7)),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                fallbackLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF60717A),
+            )
+            AsyncImage(
+                model = url,
+                contentDescription = "$fallbackLabel rank",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
         }
     }
 }

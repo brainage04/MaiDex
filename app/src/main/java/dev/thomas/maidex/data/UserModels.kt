@@ -106,6 +106,11 @@ data class PlayerProfile(
     val name: String,
     val officialRating: Int,
     val region: AccountRegion,
+    val title: String = "",
+    val starCount: Int? = null,
+    val avatarUrl: String = "",
+    val courseRankUrl: String = "",
+    val classRankUrl: String = "",
     val importedAt: Long = Instant.now().toEpochMilli(),
 )
 

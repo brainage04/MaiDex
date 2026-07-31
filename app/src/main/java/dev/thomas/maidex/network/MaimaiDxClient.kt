@@ -43,7 +43,7 @@ class MaimaiDxClient(
         val lookup = ChartLookup(charts)
         onProgress("Checking DX NET login…")
         val home = getDocument(region, "/maimai-mobile/home/")
-        val profile = parseProfile(home, region)
+        val profile = extractPlayerProfile(home, region)
             ?: throw AuthenticationRequiredException("DX NET login expired; sign in again")
 
         val scores = LinkedHashMap<String, UserScore>()
@@ -139,17 +139,6 @@ class MaimaiDxClient(
         }
     }
 
-    private fun parseProfile(document: Document, region: AccountRegion): PlayerProfile? {
-        val name = document.selectFirst(".see_through_block .name_block")?.text()?.trim().orEmpty()
-        val ratingText = document.selectFirst(".see_through_block .rating_block")?.text().orEmpty()
-        if (name.isBlank() && ratingText.isBlank()) return null
-        return PlayerProfile(
-            name = name.ifBlank { "Player" },
-            officialRating = parseInt(ratingText),
-            region = region,
-            importedAt = Instant.now().toEpochMilli(),
-        )
-    }
 
     private fun parseScoreBlock(block: Element, difficulty: String): RawScore? {
         val scoreBlocks = block.select(".music_score_block")
@@ -243,6 +232,40 @@ class MaimaiDxClient(
         )
     }
 }
+internal fun extractPlayerProfile(
+    document: Document,
+    region: AccountRegion,
+    importedAt: Long = Instant.now().toEpochMilli(),
+): PlayerProfile? {
+    val block = document.selectFirst(".see_through_block") ?: return null
+    val name = block.selectFirst(".name_block")?.text()?.trim().orEmpty()
+    val ratingText = block.selectFirst(".rating_block")?.text().orEmpty()
+    if (name.isBlank() && ratingText.isBlank()) return null
+
+    val rankImages = block.select("img.h_35.f_l")
+    val courseRank = rankImages.firstOrNull { !it.hasClass("p_l_10") }
+    val classRank = rankImages.firstOrNull { it.hasClass("p_l_10") }
+        ?: rankImages.getOrNull(1)
+    val starText = block.selectFirst(".p_l_10.f_l.f_14")?.text().orEmpty()
+
+    return PlayerProfile(
+        name = name.ifBlank { "Player" },
+        officialRating = parseInt(ratingText),
+        region = region,
+        title = block.selectFirst(".trophy_inner_block")?.text()?.trim().orEmpty(),
+        starCount = parseInt(starText).takeIf { starText.isNotBlank() },
+        avatarUrl = block.selectFirst("img.w_112.f_l").imageUrl(),
+        courseRankUrl = courseRank.imageUrl(),
+        classRankUrl = classRank.imageUrl(),
+        importedAt = importedAt,
+    )
+}
+
+private fun Element?.imageUrl(): String = this?.absUrl("src")
+    ?.ifBlank { attr("src") }
+    .orEmpty()
+
+
 internal fun extractRecentTitle(titleElement: Element): String =
     titleElement.clone()
         .also { it.select("img, .playlog_level_icon").remove() }
