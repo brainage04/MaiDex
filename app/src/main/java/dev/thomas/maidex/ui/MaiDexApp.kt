@@ -1368,9 +1368,7 @@ private fun AccountDialog(
         onDismiss()
     }) {
         Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.96f),
+            modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
         ) {
@@ -1473,10 +1471,11 @@ private fun AccountDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
+                        .padding(top = 8.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Surface(
+                        modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                         shape = RoundedCornerShape(14.dp),
                     ) {
