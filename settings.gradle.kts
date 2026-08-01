@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "MaiDex"
-include(":app")
+include(":app", ":baselineprofile")
