@@ -2,6 +2,7 @@ package dev.thomas.maidex.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.ReportDrawnWhen
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -144,6 +145,7 @@ import dev.thomas.maidex.rating.RatingCalculator
 @Composable
 fun MaiDexApp(viewModel: MainViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    ReportDrawnWhen { !state.isLoading }
     var showFilters by remember { mutableStateOf(false) }
     var selectedChart by remember { mutableStateOf<SongChart?>(null) }
     var showAbout by remember { mutableStateOf(false) }
@@ -323,8 +325,11 @@ fun MaiDexApp(viewModel: MainViewModel) {
         )
     }
     if (showDanGuide) {
+        val danChartLookup = remember(state.allCharts) {
+            DanCourseMetadata.chartLookup(state.allCharts)
+        }
         DanGuideDialog(
-            chartLookup = state.danChartLookup,
+            chartLookup = danChartLookup,
             initialRegion = state.profile?.region ?: AccountRegion.INTERNATIONAL,
             onDismiss = { showDanGuide = false },
             onChart = { chart ->

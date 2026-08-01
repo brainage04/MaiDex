@@ -48,53 +48,92 @@ class CatalogRepository(private val context: Context) {
             FROM charts c
             JOIN songs s ON s.id = c.song_id
         """.trimIndent()
+        val songSearchableTexts = HashMap<String, String>(2_048)
+        val designerSearchableTexts = HashMap<String, String>(256)
         return database.rawQuery(sql, null).use { cursor ->
             buildList(cursor.count) {
-                while (cursor.moveToNext()) add(cursor.toSongChart())
+                while (cursor.moveToNext()) {
+                    add(cursor.toSongChart(songSearchableTexts, designerSearchableTexts))
+                }
             }
         }
     }
 
-    private fun Cursor.toSongChart(): SongChart = SongChart(
-        id = getLong(0),
-        chartKey = getString(1),
-        sourceSongId = getString(2),
-        category = getString(3),
-        title = getString(4),
-        titleRomanized = getString(5),
-        titleAliases = getString(6),
-        artist = getString(7),
-        artistRomanized = getString(8),
-        bpm = nullableInt(9),
-        imageUrl = getString(10),
-        songVersion = getString(11),
-        releaseDate = nullableString(12),
-        comment = nullableString(13),
-        type = getString(14),
-        difficulty = getString(15),
-        level = nullableString(16),
-        levelValue = nullableDouble(17),
-        constant = nullableDouble(18),
-        noteDesigner = nullableString(19),
-        noteDesignerRomanized = getString(20),
-        noteCounts = NoteCounts(
-            tap = nullableInt(21),
-            hold = nullableInt(22),
-            slide = nullableInt(23),
-            touch = nullableInt(24),
-            breakNotes = nullableInt(25),
-            total = nullableInt(26),
-        ),
-        regions = Regions(
-            jp = getInt(27) == 1,
-            international = getInt(28) == 1,
-            usa = getInt(29) == 1,
-            china = getInt(30) == 1,
-        ),
-        chartVersion = nullableString(31),
-        isSpecial = getInt(32) == 1,
-        unlockInfo = UnlockMetadata.forSong(getString(2)),
-    )
+    private fun Cursor.toSongChart(
+        songSearchableTexts: MutableMap<String, String>,
+        designerSearchableTexts: MutableMap<String, String>,
+    ): SongChart {
+        val sourceSongId = getString(2)
+        val title = getString(4)
+        val titleRomanized = getString(5)
+        val titleAliases = getString(6)
+        val artist = getString(7)
+        val artistRomanized = getString(8)
+        val noteDesigner = nullableString(19)
+        val noteDesignerRomanized = getString(20)
+        val songSearchableText = songSearchableTexts.getOrPut(sourceSongId) {
+            normalizeSearch(
+                listOf(
+                    title,
+                    titleRomanized,
+                    titleAliases.replace('\u001e', ' '),
+                    artist,
+                    artistRomanized,
+                ).joinToString(" "),
+            )
+        }
+        val designerSearchableText =
+            if (noteDesigner.isNullOrBlank() && noteDesignerRomanized.isBlank()) {
+                ""
+            } else {
+                val designerKey = "${noteDesigner.orEmpty()}\u001f$noteDesignerRomanized"
+                designerSearchableTexts.getOrPut(designerKey) {
+                    normalizeSearch("${noteDesigner.orEmpty()} $noteDesignerRomanized")
+                }
+            }
+
+        return SongChart(
+            id = getLong(0),
+            chartKey = getString(1),
+            sourceSongId = sourceSongId,
+            category = getString(3),
+            title = title,
+            titleRomanized = titleRomanized,
+            titleAliases = titleAliases,
+            artist = artist,
+            artistRomanized = artistRomanized,
+            bpm = nullableInt(9),
+            imageUrl = getString(10),
+            songVersion = getString(11),
+            releaseDate = nullableString(12),
+            comment = nullableString(13),
+            type = getString(14),
+            difficulty = getString(15),
+            level = nullableString(16),
+            levelValue = nullableDouble(17),
+            constant = nullableDouble(18),
+            noteDesigner = noteDesigner,
+            noteDesignerRomanized = noteDesignerRomanized,
+            noteCounts = NoteCounts(
+                tap = nullableInt(21),
+                hold = nullableInt(22),
+                slide = nullableInt(23),
+                touch = nullableInt(24),
+                breakNotes = nullableInt(25),
+                total = nullableInt(26),
+            ),
+            regions = Regions(
+                jp = getInt(27) == 1,
+                international = getInt(28) == 1,
+                usa = getInt(29) == 1,
+                china = getInt(30) == 1,
+            ),
+            chartVersion = nullableString(31),
+            isSpecial = getInt(32) == 1,
+            unlockInfo = UnlockMetadata.forSong(sourceSongId),
+            searchableText = songSearchableText + designerSearchableText,
+        )
+    }
 
     private fun loadOptions(database: SQLiteDatabase): FilterOptions = FilterOptions(
         categories = metadataArray(database, "categories", "category"),

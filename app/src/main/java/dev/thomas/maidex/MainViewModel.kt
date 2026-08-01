@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import dev.thomas.maidex.data.AccountRegion
 import dev.thomas.maidex.data.CatalogInfo
 import dev.thomas.maidex.data.CatalogRepository
-import dev.thomas.maidex.data.DanCourseMetadata
 import dev.thomas.maidex.data.ChartFilters
 import dev.thomas.maidex.data.ChartSort
 import dev.thomas.maidex.data.ConstantAvailability
@@ -32,7 +31,7 @@ import kotlinx.coroutines.withContext
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = CatalogRepository(application)
     private val userRepository = UserDataRepository(application)
-    private val dxClient = MaimaiDxClient()
+    private val dxClient by lazy(LazyThreadSafetyMode.NONE) { MaimaiDxClient() }
     private val snapshot = MutableStateFlow<LoadedCatalog?>(null)
     private val filters = MutableStateFlow(ChartFilters())
     private val sorting = MutableStateFlow(Sorting())
@@ -72,7 +71,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             CatalogUiState(
                 charts = visible,
                 allCharts = loaded.charts,
-                danChartLookup = loaded.danChartLookup,
                 filters = activeFilters,
                 sort = activeSorting.field,
                 sortOrder = activeSorting.order,
@@ -103,7 +101,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         charts = loaded.charts,
                         options = loaded.options,
                         info = loaded.info,
-                        danChartLookup = DanCourseMetadata.chartLookup(loaded.charts),
                     )
                 }
             }.onSuccess { loaded ->
@@ -196,7 +193,6 @@ data class CatalogUiState(
     val isLoading: Boolean = false,
     val charts: List<SongChart> = emptyList(),
     val allCharts: List<SongChart> = emptyList(),
-    val danChartLookup: Map<String, SongChart> = emptyMap(),
     val filters: ChartFilters = ChartFilters(),
     val sort: ChartSort = ChartSort.LEVEL,
     val sortOrder: SortOrder = SortOrder.DESCENDING,
@@ -216,7 +212,6 @@ private data class LoadedCatalog(
     val charts: List<SongChart>,
     val options: FilterOptions,
     val info: CatalogInfo,
-    val danChartLookup: Map<String, SongChart>,
 )
 private data class Sorting(
     val field: ChartSort = ChartSort.LEVEL,

@@ -82,7 +82,6 @@ data class SongChart(
     val chartVersion: String?,
     val isSpecial: Boolean,
     val unlockInfo: List<SongUnlockInfo> = emptyList(),
-) {
     val searchableText: String = normalizeSearch(
         listOf(
             title,
@@ -94,6 +93,7 @@ data class SongChart(
             noteDesignerRomanized,
         ).joinToString(" "),
     )
+) {
 
     val displayType: String
         get() = when (type) {
@@ -199,7 +199,25 @@ data class CatalogInfo(
     val sourceUrl: String,
 )
 
-internal fun normalizeSearch(value: String): String =
-    Normalizer.normalize(value, Normalizer.Form.NFKC)
+private fun Char.isIgnoredInSearch(): Boolean =
+    this in '!'..'/' ||
+        this in ':'..'@' ||
+        this in '['..'`' ||
+        this in '{'..'~' ||
+        when (Character.getType(this)) {
+            Character.SPACE_SEPARATOR.toInt(),
+            Character.LINE_SEPARATOR.toInt(),
+            Character.PARAGRAPH_SEPARATOR.toInt(),
+            -> true
+            else -> false
+        }
+
+internal fun normalizeSearch(value: String): String {
+    val normalized = Normalizer.normalize(value, Normalizer.Form.NFKC)
         .lowercase(Locale.ROOT)
-        .replace(Regex("[\\p{Punct}\\p{Z}]+"), "")
+    return buildString(normalized.length) {
+        normalized.forEach { character ->
+            if (!character.isIgnoredInSearch()) append(character)
+        }
+    }
+}
