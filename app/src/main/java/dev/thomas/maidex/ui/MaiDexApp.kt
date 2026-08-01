@@ -91,6 +91,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -651,11 +652,7 @@ private fun ChartCard(
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    titleWithRomanization(chart.title, chart.titleRomanized),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
+                SongTitleIdentity(chart)
                 Text(
                     titleWithRomanization(chart.artist, chart.artistRomanized),
                     style = MaterialTheme.typography.bodySmall,
@@ -735,6 +732,88 @@ private fun ChartCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SongTitleIdentity(
+    chart: SongChart,
+    prominent: Boolean = false,
+) {
+    val titleStyle = if (prominent) {
+        MaterialTheme.typography.headlineSmall
+    } else {
+        MaterialTheme.typography.titleMedium
+    }
+    if (!containsNonLatinText(chart.title)) {
+        Text(
+            chart.title.ifBlank { chart.titleRomanized },
+            style = titleStyle,
+            fontWeight = if (prominent) FontWeight.Black else FontWeight.Bold,
+        )
+        return
+    }
+    val labelWidth = if (prominent) 76.dp else 58.dp
+    val metadataStyle = if (prominent) {
+        MaterialTheme.typography.bodyMedium
+    } else {
+        MaterialTheme.typography.bodySmall
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        TitleIdentityLine(
+            label = "Japanese",
+            value = chart.title,
+            labelWidth = labelWidth,
+            valueStyle = titleStyle,
+            valueWeight = if (prominent) FontWeight.Black else FontWeight.Bold,
+            maxLines = 2,
+        )
+        TitleIdentityLine(
+            label = "Reading",
+            value = chart.titleRomanized,
+            labelWidth = labelWidth,
+            valueStyle = metadataStyle,
+            maxLines = 2,
+        )
+        if (chart.titleMeaning.isNotBlank()) {
+            TitleIdentityLine(
+                label = "Meaning",
+                value = chart.titleMeaning,
+                labelWidth = labelWidth,
+                valueStyle = metadataStyle,
+                maxLines = 2,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TitleIdentityLine(
+    label: String,
+    value: String,
+    labelWidth: androidx.compose.ui.unit.Dp,
+    valueStyle: TextStyle,
+    valueWeight: FontWeight? = null,
+    maxLines: Int,
+) {
+    Row(verticalAlignment = Alignment.Top) {
+        Text(
+            label,
+            modifier = Modifier
+                .width(labelWidth)
+                .padding(top = 1.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            value,
+            modifier = Modifier.weight(1f),
+            style = valueStyle,
+            fontWeight = valueWeight,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 @Composable
@@ -2344,11 +2423,7 @@ private fun ChartDetailDialog(
                     contentScale = ContentScale.Crop,
                 )
                 Spacer(Modifier.height(14.dp))
-                Text(
-                    titleWithRomanization(chart.title, chart.titleRomanized),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black,
-                )
+                SongTitleIdentity(chart, prominent = true)
                 Spacer(Modifier.height(12.dp))
                 DetailRow("Artist", titleWithRomanization(chart.artist, chart.artistRomanized))
                 DetailRow("Category", chart.category)
@@ -2687,18 +2762,22 @@ private fun NoteCountTable(chart: SongChart) {
 internal fun titleWithRomanization(original: String, romanized: String): String {
     if (original.isBlank()) return romanized
     if (romanized.isBlank() || romanized.equals(original, ignoreCase = true)) return original
+    return if (containsNonLatinText(original)) "$original ($romanized)" else original
+}
+
+private fun containsNonLatinText(value: String): Boolean {
     var offset = 0
-    while (offset < original.length) {
-        val codePoint = original.codePointAt(offset)
+    while (offset < value.length) {
+        val codePoint = value.codePointAt(offset)
         if (
             Character.isLetter(codePoint) &&
             Character.UnicodeScript.of(codePoint) != Character.UnicodeScript.LATIN
         ) {
-            return "$original ($romanized)"
+            return true
         }
         offset += Character.charCount(codePoint)
     }
-    return original
+    return false
 }
 
 private fun difficultyLabel(value: String): String = when (value) {

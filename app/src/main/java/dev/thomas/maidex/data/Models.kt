@@ -115,6 +115,9 @@ data class SongChart(
 
     val effectiveLevel: Double?
         get() = constant ?: levelValue
+
+    val titleMeaning: String
+        get() = TitleMeaningMetadata.forSong(sourceSongId)
 }
 
 data class FilterOptions(
