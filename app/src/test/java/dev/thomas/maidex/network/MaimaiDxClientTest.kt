@@ -32,7 +32,7 @@ class MaimaiDxClientTest {
               <div class="name_block f_l f_16">B r a i n a g e</div>
               <div class="rating_block">16070</div>
               <img class="h_35 f_l" src="/maimai-mobile/img/course.png">
-              <img class="p_l_10 h_35 f_l" src="/maimai-mobile/img/class.png">
+              <img class="p_l_10 h_35 f_l" src="/maimai-mobile/img/class/class_rank_s_9f8e.png">
               <div class="p_l_10 f_l f_14">×355</div>
             </div>
             <div>play count of current version : 16</div>
@@ -54,10 +54,46 @@ class MaimaiDxClientTest {
         assertEquals("https://maimaidx-eng.com/maimai-mobile/img/avatar.png", profile.avatarUrl)
         assertEquals("gold", profile.titleRarity)
         assertEquals("https://maimaidx-eng.com/maimai-mobile/img/course.png", profile.courseRankUrl)
-        assertEquals("https://maimaidx-eng.com/maimai-mobile/img/class.png", profile.classRankUrl)
+        assertEquals(
+            "https://maimaidx-eng.com/maimai-mobile/img/class/class_rank_s_9f8e.png",
+            profile.classRankUrl,
+        )
+        assertEquals("S", profile.friendClass)
         assertEquals(16, profile.currentVersionPlayCount)
         assertEquals(2_203, profile.totalPlayCount)
         assertEquals(123L, profile.importedAt)
+    }
+
+    @Test
+    fun `map parser keeps only officially completed Chihos`() {
+        val document = Jsoup.parse(
+            """
+            <div class="map_block">
+              <div class="map_name_block_inner">トリコロちほー</div>
+              <img class="map_comp_img" src="/maimai-mobile/img/map_complete.png">
+            </div>
+            <div class="map_block">
+              <div class="map_name_block_inner">オンゲキちほー9</div>
+              <div>525 km remaining</div>
+            </div>
+            """.trimIndent(),
+        )
+
+        assertEquals(setOf("トリコロちほー"), extractCompletedChihoNames(document))
+    }
+
+    @Test
+    fun `friend matching parser prefers the detailed displayed class`() {
+        val document = Jsoup.parse(
+            """
+            <div class="friend_matching">
+              <div>Friend Class: SSS2</div>
+              <img src="/maimai-mobile/img/class/class_rank_sss_9f8e.png">
+            </div>
+            """.trimIndent(),
+        )
+
+        assertEquals("SSS2", extractFriendClass(document))
     }
 
     @Test

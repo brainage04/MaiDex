@@ -13,6 +13,44 @@ internal object DxNetAssets {
         starIconUrl = profile.starIconUrl.ifBlank { starIconUrl },
     )
 
+    fun gradeIconUrl(grade: Grade): String {
+        val name = when (grade) {
+            Grade.SSS_PLUS -> "sssp"
+            Grade.SS_PLUS -> "ssp"
+            Grade.S_PLUS -> "sp"
+            else -> grade.name.lowercase()
+        }
+        return "$IMAGE_ROOT/music_icon_$name.png?ver=$ASSET_VERSION"
+    }
+
+    fun comboIconUrl(medal: ComboMedal): String = when (medal) {
+        ComboMedal.NONE -> ""
+        ComboMedal.FC -> "$IMAGE_ROOT/music_icon_fc.png?ver=$ASSET_VERSION"
+        ComboMedal.FC_PLUS -> "$IMAGE_ROOT/music_icon_fcp.png?ver=$ASSET_VERSION"
+        ComboMedal.AP -> "$IMAGE_ROOT/music_icon_ap.png?ver=$ASSET_VERSION"
+        ComboMedal.AP_PLUS -> "$IMAGE_ROOT/music_icon_app.png?ver=$ASSET_VERSION"
+    }
+
+    fun syncIconUrl(medal: SyncMedal): String = when (medal) {
+        SyncMedal.NONE -> ""
+        SyncMedal.SYNC -> "$IMAGE_ROOT/music_icon_sync.png?ver=$ASSET_VERSION"
+        SyncMedal.FS -> "$IMAGE_ROOT/music_icon_fs.png?ver=$ASSET_VERSION"
+        SyncMedal.FS_PLUS -> "$IMAGE_ROOT/music_icon_fsp.png?ver=$ASSET_VERSION"
+        SyncMedal.FDX -> "$IMAGE_ROOT/music_icon_fsd.png?ver=$ASSET_VERSION"
+        SyncMedal.FDX_PLUS -> "$IMAGE_ROOT/music_icon_fsdp.png?ver=$ASSET_VERSION"
+    }
+
+    fun chartTypeIconUrl(type: String): String = when (type.lowercase()) {
+        "dx" -> "$IMAGE_ROOT/music_dx.png?ver=$ASSET_VERSION"
+        "std" -> "$IMAGE_ROOT/music_standard.png?ver=$ASSET_VERSION"
+        else -> ""
+    }
+
+    fun dxStarIconUrl(stars: Int): String =
+        stars.takeIf { it in 1..5 }
+            ?.let { "$IMAGE_ROOT/playlog/dxstar_$it.png?ver=$ASSET_VERSION" }
+            .orEmpty()
+
     fun titleBackgroundUrl(rarity: String): String {
         val verifiedRarity = rarity.lowercase().takeIf(titleRarities::contains) ?: "normal"
         return "$IMAGE_ROOT/trophy_$verifiedRarity.png?ver=$ASSET_VERSION"

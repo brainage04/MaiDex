@@ -44,13 +44,16 @@ class MaimaiDxClient(
     suspend fun syncAccount(region: AccountRegion): AccountSyncResult = withContext(Dispatchers.IO) {
         requireAuthenticatedCookie(region)
         val home = getDocument(region, "/maimai-mobile/home/")
-        val profile = extractPlayerProfile(home, region)
+        val baseProfile = extractPlayerProfile(home, region)
             ?: throw AuthenticationRequiredException("DX NET login expired; sign in again")
-        val circle = extractCircleData(
-            documents = getCircleDocuments(region),
-            playerName = profile.name,
-            importedAt = profile.importedAt,
-        )
+        val profile = loadAccountProgress(region, baseProfile)
+        val circle = optionalSupplement {
+            extractCircleData(
+                documents = getCircleDocuments(region),
+                playerName = profile.name,
+                importedAt = profile.importedAt,
+            )
+        }
         AccountSyncResult(profile, circle)
     }
 
@@ -63,14 +66,18 @@ class MaimaiDxClient(
         val lookup = ChartLookup(charts)
         onProgress("Checking DX NET login…")
         val home = getDocument(region, "/maimai-mobile/home/")
-        val profile = extractPlayerProfile(home, region)
+        val baseProfile = extractPlayerProfile(home, region)
             ?: throw AuthenticationRequiredException("DX NET login expired; sign in again")
+        onProgress("Importing account progress…")
+        val profile = loadAccountProgress(region, baseProfile)
         onProgress("Importing circle data…")
-        val circle = extractCircleData(
-            documents = getCircleDocuments(region),
-            playerName = profile.name,
-            importedAt = profile.importedAt,
-        )
+        val circle = optionalSupplement {
+            extractCircleData(
+                documents = getCircleDocuments(region),
+                playerName = profile.name,
+                importedAt = profile.importedAt,
+            )
+        }
 
         val scores = LinkedHashMap<String, UserScore>()
         var unmatched = 0
@@ -144,6 +151,30 @@ class MaimaiDxClient(
         }
     }
 
+    private fun loadAccountProgress(region: AccountRegion, profile: PlayerProfile): PlayerProfile {
+        val mapDocument = optionalSupplement { getDocument(region, "/maimai-mobile/map/") }
+        val matchingDocument = optionalSupplement {
+            getDocument(region, "/maimai-mobile/friend/matching/")
+        }
+        return profile.copy(
+            completedChihoNames = mapDocument
+                ?.let(::extractCompletedChihoNames)
+                .orEmpty(),
+            friendClass = matchingDocument
+                ?.let(::extractFriendClass)
+                .orEmpty()
+                .ifBlank { profile.friendClass },
+        )
+    }
+
+    private inline fun <T> optionalSupplement(block: () -> T): T? = try {
+        block()
+    } catch (failure: AuthenticationRequiredException) {
+        throw failure
+    } catch (_: Exception) {
+        null
+    }
+
     private fun getCircleDocuments(region: AccountRegion): List<Document> {
         val main = getDocument(region, "/maimai-mobile/circle/")
         val linkedUrls = linkedSetOf<String>()
@@ -192,7 +223,11 @@ class MaimaiDxClient(
             }
             cookieManager.flush()
             val finalUrl = response.request.url.toString()
-            if (!finalUrl.startsWith(region.baseUrl)) {
+            if (
+                !finalUrl.startsWith(region.baseUrl) ||
+                finalUrl.substringBefore('?').trimEnd('/') ==
+                "${region.baseUrl}/maimai-mobile".trimEnd('/')
+            ) {
                 throw AuthenticationRequiredException("DX NET login expired; sign in again")
             }
             Jsoup.parse(response.body?.string().orEmpty(), finalUrl)
@@ -660,6 +695,37 @@ private fun String?.parseOptionalInt(): Int? = this
     ?.replace(Regex("""[^0-9-]"""), "")
     ?.toIntOrNull()
 
+
+internal fun extractCompletedChihoNames(document: Document): Set<String> =
+    document.select(
+        ".map_comp_img, .event_map_comp_img, img[src*=map_comp], img[src*=map_complete]",
+    ).mapNotNullTo(linkedSetOf()) { completion ->
+        generateSequence(completion.parent()) { element -> element.parent() }
+            .take(7)
+            .mapNotNull { container ->
+                container.selectFirst(
+                    ".map_name_block_inner, .map_name_block_s_inner, .mapdetail_name_block_inner",
+                )?.text()?.normalizedWhitespace()?.takeIf(String::isNotBlank)
+            }
+            .firstOrNull()
+    }
+
+internal fun extractFriendClass(document: Document): String {
+    val labeledClass = Regex(
+        """(?:friend\s*class|class|クラス|階級)\s*[:：]?\s*(LEGEND|SSS[1-5]?|SS[1-5]?|S[1-5]?|A[1-5]?|B[1-5]?)""",
+        RegexOption.IGNORE_CASE,
+    ).find(document.text())?.groupValues?.getOrNull(1)
+    if (!labeledClass.isNullOrBlank()) return labeledClass.uppercase(Locale.ROOT)
+    val classRankUrl = document
+        .selectFirst("""img[src*="/class/class_rank_"]""")
+        .imageUrl()
+    return friendClassFromUrl(classRankUrl)
+}
+
+private fun friendClassFromUrl(url: String): String = Regex(
+    """class_rank_(legend|sss[1-5]?|ss[1-5]?|s[1-5]?|a[1-5]?|b[1-5]?)_""",
+    RegexOption.IGNORE_CASE,
+).find(url)?.groupValues?.getOrNull(1)?.uppercase(Locale.ROOT).orEmpty()
 internal fun extractPlayerProfile(
     document: Document,
     region: AccountRegion,
@@ -708,6 +774,7 @@ internal fun extractPlayerProfile(
         avatarUrl = avatar.imageUrl(),
         courseRankUrl = courseRank.imageUrl(),
         classRankUrl = classRank.imageUrl(),
+        friendClass = friendClassFromUrl(classRank.imageUrl()),
         currentVersionPlayCount = currentVersionPlayCount,
         totalPlayCount = totalPlayCount,
         importedAt = importedAt,

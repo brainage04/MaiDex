@@ -65,6 +65,36 @@ class UnlockAndDxScoreTest {
     }
 
     @Test
+    fun `class battle metadata covers every guide version and class`() {
+        val guideVersions = UnlockMetadata.guideEntries
+            .filter { it.section == UnlockGuideSection.CLASS_BATTLES }
+            .map(UnlockGuideEntry::title)
+
+        assertEquals(guideVersions.toSet(), ClassBattleMetadata.byVersion.keys)
+        ClassBattleMetadata.byVersion
+            .filterKeys { it != "Splash" }
+            .forEach { (_, milestones) ->
+                assertEquals(20, milestones.size)
+                assertEquals("A5", milestones.first().className)
+                assertEquals("SSS1", milestones.last().className)
+            }
+        assertEquals(21, ClassBattleMetadata.byVersion.getValue("Splash").size)
+        assertEquals("初段", ClassBattleMetadata.byVersion.getValue("Splash").first().className)
+        assertEquals("拾皆伝", ClassBattleMetadata.byVersion.getValue("Splash").last().className)
+    }
+
+    @Test
+    fun `score card assets use official DX NET icon names`() {
+        assertTrue(DxNetAssets.gradeIconUrl(Grade.SSS_PLUS).contains("music_icon_sssp.png"))
+        assertTrue(DxNetAssets.comboIconUrl(ComboMedal.AP_PLUS).contains("music_icon_app.png"))
+        assertTrue(DxNetAssets.syncIconUrl(SyncMedal.FDX_PLUS).contains("music_icon_fsdp.png"))
+        assertTrue(DxNetAssets.chartTypeIconUrl("DX").contains("music_dx.png"))
+        assertTrue(DxNetAssets.chartTypeIconUrl("STD").contains("music_standard.png"))
+        assertTrue(DxNetAssets.dxStarIconUrl(5).contains("playlog/dxstar_5.png"))
+        assertEquals("", DxNetAssets.dxStarIconUrl(0))
+    }
+
+    @Test
     fun `DX score stars use official percentage boundaries`() {
         assertEquals(0, score(8_499).dxStarCount)
         assertEquals(1, score(8_500).dxStarCount)

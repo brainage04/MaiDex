@@ -2,6 +2,7 @@ package dev.thomas.maidex.tracking
 
 import android.content.Context
 import android.webkit.CookieManager
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
@@ -11,6 +12,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dev.thomas.maidex.data.UserDataRepository
 import dev.thomas.maidex.network.MaimaiDxClient
+import dev.thomas.maidex.network.AuthenticationRequiredException
 import java.time.Duration
 import java.time.ZonedDateTime
 import java.util.concurrent.TimeUnit
@@ -27,7 +29,8 @@ class CircleTrackingWorker(
             ?: return Result.success()
         val settings = repository.loadTrackingSettings()
         repository.recordTrackingAttempt()
-        return try {
+        var retrying = false
+        val outcome = try {
             val cookieManager = withContext(Dispatchers.Main) { CookieManager.getInstance() }
             val snapshot = MaimaiDxClient(cookieManager).syncAccount(profile.region)
             withContext(Dispatchers.IO) {
@@ -36,11 +39,16 @@ class CircleTrackingWorker(
             }
             Result.success()
         } catch (failure: Exception) {
-            repository.recordTrackingFailure(failure.message ?: "Unable to refresh DX NET tracking data")
-            Result.success()
-        } finally {
+            repository.recordTrackingFailure(
+                failure.message ?: "Unable to refresh DX NET tracking data",
+            )
+            retrying = shouldRetryDailySync(failure, runAttemptCount)
+            if (retrying) Result.retry() else Result.success()
+        }
+        if (!retrying) {
             CircleTrackingScheduler.scheduleNext(applicationContext, settings.syncHour)
         }
+        return outcome
     }
 }
 
@@ -73,12 +81,16 @@ object CircleTrackingScheduler {
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build(),
         )
+        .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
         .setInitialDelay(
             nextTrackingDelayMillis(ZonedDateTime.now(), hour.coerceIn(0, 23)),
             TimeUnit.MILLISECONDS,
         )
         .build()
 }
+
+internal fun shouldRetryDailySync(failure: Exception, runAttemptCount: Int): Boolean =
+    failure !is AuthenticationRequiredException && runAttemptCount < 2
 
 internal fun nextTrackingDelayMillis(now: ZonedDateTime, hour: Int): Long {
     var next = now

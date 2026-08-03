@@ -46,6 +46,13 @@ data class UnlockGuideEntry(
     val sourceUrl: String,
 )
 
+data class ClassBattleMilestone(
+    val className: String,
+    val songTitle: String,
+    val level: String,
+    val opponentStrength: String,
+)
+
 data class SongUnlockInfo(
     val label: String,
     val summary: String,

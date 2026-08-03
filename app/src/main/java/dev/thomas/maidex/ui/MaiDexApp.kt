@@ -11,6 +11,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -25,6 +26,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -41,13 +44,16 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MilitaryTech
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -66,6 +72,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -86,15 +93,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalInspectionMode
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -122,12 +127,15 @@ import dev.thomas.maidex.data.DanTrack
 import dev.thomas.maidex.data.ChartFilters
 import dev.thomas.maidex.data.ChartSort
 import dev.thomas.maidex.data.ComboMedal
+import dev.thomas.maidex.data.ClassBattleMetadata
+import dev.thomas.maidex.data.ClassBattleMilestone
 import dev.thomas.maidex.data.FilterOptions
 import dev.thomas.maidex.data.CircleDailySnapshot
 import dev.thomas.maidex.data.CircleData
 import dev.thomas.maidex.data.MedalLevelTable
 import dev.thomas.maidex.data.SongChart
 import dev.thomas.maidex.data.SongUnlockInfo
+import dev.thomas.maidex.data.DxNetAssets
 import dev.thomas.maidex.data.UnlockGuideEntry
 import dev.thomas.maidex.data.UnlockGuideSection
 import dev.thomas.maidex.data.UnlockMetadata
@@ -144,6 +152,7 @@ import dev.thomas.maidex.data.SortOrder
 import dev.thomas.maidex.data.SyncMedal
 import dev.thomas.maidex.data.TrackingSettings
 import dev.thomas.maidex.data.UserScore
+import dev.thomas.maidex.data.normalizeSearch
 import dev.thomas.maidex.rating.AchievementLossCalculator
 import dev.thomas.maidex.rating.RatingCalculator
 import java.time.Instant
@@ -341,6 +350,8 @@ fun MaiDexApp(viewModel: MainViewModel) {
         UnlockGuideDialog(
             initialEntryId = selectedUnlockGuideEntryId,
             charts = state.allCharts,
+            scores = state.scores,
+            profile = state.profile,
             onDismiss = {
                 showUnlockGuide = false
                 selectedUnlockGuideEntryId = null
@@ -514,7 +525,7 @@ private fun CatalogContent(
                     }
                 }
             },
-            label = { Text("Find a chart constant") },
+            label = { Text("Search") },
             placeholder = { Text("Title, romaji, artist, or notes designer") },
         )
         CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 40.dp) {
@@ -662,30 +673,43 @@ private fun ChartCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        colors = CardDefaults.cardColors(containerColor = chartCardColor(chart.difficulty)),
+        border = BorderStroke(2.dp, chartCardBorderColor(chart.difficulty)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
-        Row(modifier = Modifier.padding(10.dp)) {
+        Row(modifier = Modifier.padding(8.dp)) {
             AsyncImage(
                 model = chart.imageUrl,
                 contentDescription = "Cover art for ${chart.title}",
                 modifier = Modifier
                     .size(92.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White.copy(alpha = 0.72f)),
                 contentScale = ContentScale.Crop,
             )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                SongTitleIdentity(chart)
+            Spacer(Modifier.width(9.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color(0xFF313131),
+                    shape = RoundedCornerShape(6.dp),
+                ) {
+                    SongTitleIdentity(
+                        chart = chart,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                        color = Color.White,
+                    )
+                }
                 Text(
                     titleWithRomanization(chart.artist, chart.artistRomanized),
                     style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    color = Color(0xFF202020),
                 )
-                Spacer(Modifier.height(7.dp))
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -706,18 +730,33 @@ private fun ChartCard(
                             append(chart.level ?: "?")
                             chart.constant?.let { append(" (${String.format(Locale.US, "%.1f", it)})") }
                         },
+                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
-                        color = if (chart.constant != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        color = Color(0xFF202020),
                     )
-                    Text(chart.displayType, style = MaterialTheme.typography.labelMedium)
+                    val typeIconUrl = DxNetAssets.chartTypeIconUrl(chart.displayType)
+                    if (typeIconUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = typeIconUrl,
+                            contentDescription = "${chart.displayType} chart",
+                            modifier = Modifier
+                                .width(44.dp)
+                                .height(18.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                    } else {
+                        Text(
+                            chart.displayType,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color(0xFF202020),
+                        )
+                    }
                 }
                 Text(
                     listOfNotNull(chart.chartVersion, chart.bpm?.let { "$it BPM" }).joinToString(" · "),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    color = Color(0xFF383838),
                 )
                 chart.unlockInfo.forEach { info ->
                     UnlockTileInfo(
@@ -727,34 +766,86 @@ private fun ChartCard(
                         },
                     )
                 }
-                if (score != null) {
-                    HorizontalDivider(Modifier.padding(vertical = 7.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            String.format(Locale.US, "%.4f%%", score.achievement),
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        MedalPill(score.grade.label, MaterialTheme.colorScheme.primaryContainer)
-                        Spacer(Modifier.weight(1f))
-                        RatingCalculator.chartRating(chart, score)?.let {
-                            Text("Rt $it", style = MaterialTheme.typography.labelLarge)
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (score.comboMedal != ComboMedal.NONE) {
-                            MedalPill(score.comboMedal.label, Color(0xFFFFD9E4))
-                        }
-                        if (score.syncMedal != SyncMedal.NONE) {
-                            MedalPill(score.syncMedal.label, Color(0xFFD4E8FF))
-                        }
-                    }
-                    DxScoreLine(score)
+                score?.let {
+                    DxNetScorePanel(chart = chart, score = it)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DxNetScorePanel(
+    chart: SongChart,
+    score: UserScore,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = scorePanelColor(score.grade),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, Color.Black.copy(alpha = 0.18f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    String.format(Locale.US, "%.4f%%", score.achievement),
+                    modifier = Modifier.weight(1f),
+                    fontWeight = FontWeight.Black,
+                    color = Color(0xFF202020),
+                )
+                AsyncImage(
+                    model = DxNetAssets.gradeIconUrl(score.grade),
+                    contentDescription = "${score.grade.label} rank",
+                    modifier = Modifier
+                        .width(52.dp)
+                        .height(24.dp),
+                    contentScale = ContentScale.Fit,
+                )
+                RatingCalculator.chartRating(chart, score)?.let {
+                    Text(
+                        "Rt $it",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF202020),
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (score.comboMedal != ComboMedal.NONE) {
+                    AsyncImage(
+                        model = DxNetAssets.comboIconUrl(score.comboMedal),
+                        contentDescription = score.comboMedal.label,
+                        modifier = Modifier
+                            .width(34.dp)
+                            .height(27.dp),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
+                if (score.syncMedal != SyncMedal.NONE) {
+                    AsyncImage(
+                        model = DxNetAssets.syncIconUrl(score.syncMedal),
+                        contentDescription = score.syncMedal.label,
+                        modifier = Modifier
+                            .width(34.dp)
+                            .height(27.dp),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
+                DxScoreLine(
+                    score = score,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
@@ -764,83 +855,26 @@ private fun ChartCard(
 private fun SongTitleIdentity(
     chart: SongChart,
     prominent: Boolean = false,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
 ) {
-    val titleStyle = if (prominent) {
-        MaterialTheme.typography.headlineSmall
-    } else {
-        MaterialTheme.typography.titleMedium
-    }
-    if (!containsNonLatinText(chart.title)) {
-        Text(
-            chart.title.ifBlank { chart.titleRomanized },
-            style = titleStyle,
-            fontWeight = if (prominent) FontWeight.Black else FontWeight.Bold,
-        )
-        return
-    }
-    val labelWidth = if (prominent) 76.dp else 58.dp
-    val metadataStyle = if (prominent) {
-        MaterialTheme.typography.bodyMedium
-    } else {
-        MaterialTheme.typography.bodySmall
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        TitleIdentityLine(
-            label = "Japanese",
-            value = chart.title,
-            labelWidth = labelWidth,
-            valueStyle = titleStyle,
-            valueWeight = if (prominent) FontWeight.Black else FontWeight.Bold,
-            maxLines = 2,
-        )
-        TitleIdentityLine(
-            label = "Reading",
-            value = chart.titleRomanized,
-            labelWidth = labelWidth,
-            valueStyle = metadataStyle,
-            maxLines = 2,
-        )
-        if (chart.titleMeaning.isNotBlank()) {
-            TitleIdentityLine(
-                label = "Meaning",
-                value = chart.titleMeaning,
-                labelWidth = labelWidth,
-                valueStyle = metadataStyle,
-                maxLines = 2,
-            )
-        }
-    }
+    Text(
+        text = songIdentityTitle(
+            original = chart.title,
+            romanized = chart.titleRomanized,
+            meaning = chart.titleMeaning,
+        ),
+        modifier = modifier,
+        style = if (prominent) {
+            MaterialTheme.typography.headlineSmall
+        } else {
+            MaterialTheme.typography.titleMedium
+        },
+        fontWeight = if (prominent) FontWeight.Black else FontWeight.Bold,
+        color = color,
+    )
 }
 
-@Composable
-private fun TitleIdentityLine(
-    label: String,
-    value: String,
-    labelWidth: androidx.compose.ui.unit.Dp,
-    valueStyle: TextStyle,
-    valueWeight: FontWeight? = null,
-    maxLines: Int,
-) {
-    Row(verticalAlignment = Alignment.Top) {
-        Text(
-            label,
-            modifier = Modifier
-                .width(labelWidth)
-                .padding(top = 1.dp),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            value,
-            modifier = Modifier.weight(1f),
-            style = valueStyle,
-            fontWeight = valueWeight,
-            maxLines = maxLines,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
 @Composable
 private fun UnlockTileInfo(
     info: SongUnlockInfo,
@@ -865,8 +899,6 @@ private fun UnlockTileInfo(
                 info.summary,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
             )
             if (onOpenGuide != null) {
                 Text(
@@ -928,24 +960,29 @@ private fun UnlockDetailInfo(
 }
 
 @Composable
-private fun DxScoreLine(score: UserScore) {
+private fun DxScoreLine(
+    score: UserScore,
+    modifier: Modifier = Modifier,
+) {
     Row(
-        modifier = Modifier.padding(top = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             "DX ${dxScoreText(score)}",
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Color(0xFF383838),
         )
         if (score.dxStarCount > 0) {
-            Text(
-                "★".repeat(score.dxStarCount),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Black,
-                color = Color(0xFFF5A000),
+            AsyncImage(
+                model = DxNetAssets.dxStarIconUrl(score.dxStarCount),
+                contentDescription = "${score.dxStarCount} DX stars",
+                modifier = Modifier
+                    .width(66.dp)
+                    .height(16.dp),
+                contentScale = ContentScale.Fit,
             )
         }
     }
@@ -957,17 +994,6 @@ private fun dxScoreText(score: UserScore): String {
     return "${score.dxScore}/${score.maxDxScore} (${String.format(Locale.US, "%.2f", percentage)}%)"
 }
 
-@Composable
-private fun MedalPill(label: String, color: Color) {
-    Surface(color = color, shape = RoundedCornerShape(7.dp)) {
-        Text(
-            label,
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Black,
-        )
-    }
-}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -1228,6 +1254,8 @@ private fun DanTrackRow(
 private fun UnlockGuideDialog(
     initialEntryId: String?,
     charts: List<SongChart>,
+    scores: Map<String, UserScore>,
+    profile: PlayerProfile?,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1240,12 +1268,31 @@ private fun UnlockGuideDialog(
     val romanizedTitles = remember(charts) {
         charts.asSequence().associate { it.sourceSongId to it.titleRomanized }
     }
+    val (bestScoresBySong, bestScoresBySongAndLevel) = remember(charts, scores) {
+        val bySong = mutableMapOf<String, UserScore>()
+        val bySongAndLevel = mutableMapOf<String, UserScore>()
+        charts.forEach { chart ->
+            val score = scores[chart.chartKey] ?: return@forEach
+            setOf(chart.sourceSongId, chart.title).forEach { title ->
+                val songKey = unlockProgressSongKey(title)
+                if ((bySong[songKey]?.achievement ?: -1.0) < score.achievement) {
+                    bySong[songKey] = score
+                }
+                val milestoneKey = classBattleScoreKey(title, chart.level.orEmpty())
+                if ((bySongAndLevel[milestoneKey]?.achievement ?: -1.0) < score.achievement) {
+                    bySongAndLevel[milestoneKey] = score
+                }
+            }
+        }
+        bySong to bySongAndLevel
+    }
     val entries = UnlockMetadata.guideEntries.filter { it.section == section }
     val orderedEntries = if (initialEntry?.section == section) {
         listOf(initialEntry) + entries.filterNot { it.id == initialEntry.id }
     } else {
         entries
     }
+    val currentClassVersion = ClassBattleMetadata.byVersion.keys.firstOrNull()
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -1263,10 +1310,18 @@ private fun UnlockGuideDialog(
                     Column(Modifier.weight(1f)) {
                         Text("Unlock guides", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text(
-                            "International Chihos and Friend Matching Gift Songs",
+                            "DX NET Chiho completion and Friend Matching class progress",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        profile?.friendClass?.takeIf(String::isNotBlank)?.let { friendClass ->
+                            Text(
+                                "Current Friend Matching class: $friendClass",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
                     TextButton(onClick = onDismiss) { Text("Close") }
                 }
@@ -1290,9 +1345,18 @@ private fun UnlockGuideDialog(
                         UnlockGuideEntryCard(
                             entry = entry,
                             isLinkedEntry = entry.id == initialEntryId,
+                            isCurrentClassVersion = entry.title == currentClassVersion,
                             romanizedTitles = romanizedTitles,
+                            bestScoresBySong = bestScoresBySong,
+                            bestScoresBySongAndLevel = bestScoresBySongAndLevel,
+                            profile = profile,
                             onOpenSource = {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(entry.sourceUrl)))
+                                val sourceUrl = if (entry.section == UnlockGuideSection.CLASS_BATTLES) {
+                                    ClassBattleMetadata.sourceUrlForVersion(entry.title)
+                                } else {
+                                    entry.sourceUrl
+                                }
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sourceUrl)))
                             },
                         )
                     }
@@ -1306,9 +1370,35 @@ private fun UnlockGuideDialog(
 private fun UnlockGuideEntryCard(
     entry: UnlockGuideEntry,
     isLinkedEntry: Boolean,
+    isCurrentClassVersion: Boolean,
     romanizedTitles: Map<String, String>,
+    bestScoresBySong: Map<String, UserScore>,
+    bestScoresBySongAndLevel: Map<String, UserScore>,
+    profile: PlayerProfile?,
     onOpenSource: () -> Unit,
 ) {
+    val isChiho = entry.section == UnlockGuideSection.CHIHOS
+    val milestones = ClassBattleMetadata.byVersion[entry.title].orEmpty()
+    var showMilestones by remember(entry.id) { mutableStateOf(isLinkedEntry) }
+    val completedChiho = isChiho && chihoIsCompleted(
+        title = entry.title,
+        romanized = entry.titleRomanized,
+        completedNames = profile?.completedChihoNames.orEmpty(),
+    )
+    val playedUnlockSongs = entry.songs.count { song ->
+        bestScoresBySong[unlockProgressSongKey(song.title)] != null
+    }
+    val clearedClasses = if (isCurrentClassVersion) {
+        classBattleClearedCount(milestones, profile?.friendClass.orEmpty())
+    } else {
+        0
+    }
+    val milestoneScores = milestones.count { milestone ->
+        bestScoresBySongAndLevel[
+            classBattleScoreKey(milestone.songTitle, milestone.level)
+        ] != null || bestScoresBySong[unlockProgressSongKey(milestone.songTitle)] != null
+    }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = if (isLinkedEntry) {
@@ -1340,32 +1430,208 @@ private fun UnlockGuideEntryCard(
             )
             Spacer(Modifier.height(5.dp))
             Text(entry.details, style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.68f),
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(9.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = when {
+                                completedChiho -> Icons.Default.CheckCircle
+                                isCurrentClassVersion && clearedClasses == milestones.size && milestones.isNotEmpty() ->
+                                    Icons.Default.CheckCircle
+                                else -> Icons.Default.RadioButtonUnchecked
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = if (
+                                completedChiho ||
+                                isCurrentClassVersion && clearedClasses == milestones.size && milestones.isNotEmpty()
+                            ) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            },
+                        )
+                        Text(
+                            text = when {
+                                isChiho && completedChiho -> "DX NET map complete"
+                                isChiho -> "$playedUnlockSongs/${entry.songs.size} unlock songs played · map not confirmed complete"
+                                isCurrentClassVersion && profile?.friendClass.equals("LEGEND", ignoreCase = true) ->
+                                    "LEGEND · all ${milestones.size} classes cleared"
+                                isCurrentClassVersion && profile?.friendClass.isNullOrBlank() ->
+                                    "Sync DX NET to track the current class"
+                                isCurrentClassVersion ->
+                                    "$clearedClasses/${milestones.size} classes cleared · current ${profile?.friendClass}"
+                                else ->
+                                    "Historical season · best scores imported for $milestoneScores/${milestones.size} bosses"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    val progress = when {
+                        isChiho && completedChiho -> 1f
+                        isChiho && entry.songs.isNotEmpty() ->
+                            playedUnlockSongs.toFloat() / entry.songs.size
+                        isCurrentClassVersion && milestones.isNotEmpty() ->
+                            clearedClasses.toFloat() / milestones.size
+                        milestones.isNotEmpty() -> milestoneScores.toFloat() / milestones.size
+                        else -> 0f
+                    }
+                    LinearProgressIndicator(
+                        progress = { progress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            Spacer(Modifier.height(7.dp))
             entry.songs.forEach { song ->
+                val played = bestScoresBySong[unlockProgressSongKey(song.title)] != null
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 2.dp),
+                        .padding(vertical = 3.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top,
                 ) {
-                    Text(
-                        "• ${titleWithRomanization(song.title, romanizedTitles[song.title].orEmpty())}",
-                        modifier = Modifier.weight(1f),
-                        fontWeight = FontWeight.SemiBold,
+                    Icon(
+                        imageVector = if (played) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .size(17.dp),
+                        tint = if (played) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (song.requirement.isNotBlank()) {
+                    Column(Modifier.weight(1f)) {
                         Text(
-                            song.requirement,
+                            titleWithRomanization(song.title, romanizedTitles[song.title].orEmpty()),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            listOfNotNull(
+                                song.requirement.takeIf(String::isNotBlank),
+                                "Played".takeIf { played },
+                            ).joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
             }
+            if (!isChiho && milestones.isNotEmpty()) {
+                TextButton(
+                    onClick = { showMilestones = !showMilestones },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (showMilestones) {
+                            "Hide ${milestones.size} class milestones"
+                        } else {
+                            "Show ${milestones.size} class milestones"
+                        },
+                    )
+                }
+                if (showMilestones) {
+                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        milestones.forEachIndexed { index, milestone ->
+                            ClassBattleMilestoneRow(
+                                milestone = milestone,
+                                score = bestScoresBySongAndLevel[
+                                    classBattleScoreKey(milestone.songTitle, milestone.level)
+                                ] ?: bestScoresBySong[unlockProgressSongKey(milestone.songTitle)],
+                                cleared = isCurrentClassVersion && index < clearedClasses,
+                                current = isCurrentClassVersion &&
+                                    index == clearedClasses &&
+                                    !profile?.friendClass.equals("LEGEND", ignoreCase = true),
+                            )
+                        }
+                    }
+                }
+            }
             TextButton(onClick = onOpenSource, modifier = Modifier.align(Alignment.End)) {
                 Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
-                Text("Source")
+                Text(if (isChiho) "Source" else "Boss source")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClassBattleMilestoneRow(
+    milestone: ClassBattleMilestone,
+    score: UserScore?,
+    cleared: Boolean,
+    current: Boolean,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = when {
+            cleared -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+            current -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.72f)
+            else -> MaterialTheme.colorScheme.surfaceContainer
+        },
+        shape = RoundedCornerShape(9.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                imageVector = if (cleared) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                contentDescription = null,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .size(17.dp),
+                tint = if (cleared) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column(Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        milestone.className,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        "Lv ${milestone.level} · strength ${milestone.opponentStrength}",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.End,
+                    )
+                }
+                Text(
+                    milestone.songTitle,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    when {
+                        cleared -> "Cleared on DX NET"
+                        current -> score?.let {
+                            "Current class · best ${String.format(Locale.US, "%.4f%%", it.achievement)}"
+                        } ?: "Current class"
+                        score != null -> "Imported best ${String.format(Locale.US, "%.4f%%", score.achievement)}"
+                        else -> "No imported best score"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -2829,221 +3095,242 @@ private fun ProfileCardCloseUpDialog(
     profile: PlayerProfile,
     onDismiss: () -> Unit,
 ) {
+    var rotated by remember { mutableStateOf(false) }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(onClick = onDismiss),
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
+            val naturalWidth = if (rotated) {
+                (maxHeight * 0.86f).coerceAtMost(720.dp)
+            } else {
+                (maxWidth * 0.96f).coerceAtMost(720.dp)
+            }
+            val naturalHeight = naturalWidth / PROFILE_CARD_ASPECT_RATIO
+            DxNetProfileCard(
+                profile = profile,
+                modifier = Modifier
+                    .requiredWidth(naturalWidth)
+                    .requiredHeight(naturalHeight)
+                    .graphicsLayer(rotationZ = if (rotated) 90f else 0f),
+            )
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 12.dp),
+                color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.94f),
+                shape = RoundedCornerShape(50),
             ) {
-                DxNetProfileCard(
-                    profile = profile,
-                    modifier = Modifier
-                        .fillMaxWidth(0.96f)
-                        .widthIn(max = 720.dp),
-                )
-                Spacer(Modifier.height(12.dp))
-                Surface(
-                    color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.9f),
-                    shape = RoundedCornerShape(50),
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        "Tap anywhere to close",
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                        color = MaterialTheme.colorScheme.inverseOnSurface,
-                        style = MaterialTheme.typography.labelLarge,
-                    )
+                    TextButton(onClick = { rotated = !rotated }) {
+                        Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null)
+                        Spacer(Modifier.width(5.dp))
+                        Text(if (rotated) "Return card" else "Rotate · larger")
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text("Close")
+                    }
                 }
             }
         }
     }
 }
+
+private const val PROFILE_CARD_ASPECT_RATIO = 2.3f
 
 @Composable
 private fun DxNetProfileCard(
     profile: PlayerProfile,
     modifier: Modifier = Modifier,
 ) {
-    val density = LocalDensity.current
-    val nameFontSize = with(density) { 12.dp.toSp() }
-    val starFontSize = with(density) { 13.dp.toSp() }
-    val hasPlayCounts = profile.currentVersionPlayCount != null || profile.totalPlayCount != null
-    Surface(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .aspectRatio(if (hasPlayCounts) 2.3f else 2.9f),
-        shape = RoundedCornerShape(8.dp),
-        color = Color(0xFFC5ECFA),
-        shadowElevation = 2.dp,
+            .aspectRatio(PROFILE_CARD_ASPECT_RATIO),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(5.dp),
+        val scale = (maxWidth.value / 400f).coerceIn(0.78f, 1.8f)
+        val nameFontSize = 12.sp * scale
+        val starFontSize = 13.sp * scale
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            shape = RoundedCornerShape(8.dp * scale),
+            color = Color(0xFFC5ECFA),
+            shadowElevation = 2.dp,
         ) {
-            Surface(
-                modifier = if (hasPlayCounts) {
-                    Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                } else {
-                    Modifier.fillMaxSize()
-                },
-                color = Color(0xFFFCFEFF),
-                shape = RoundedCornerShape(5.dp),
-                border = BorderStroke(1.dp, Color(0xFFC7D1D6)),
-                shadowElevation = 1.dp,
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(5.dp * scale),
             ) {
-                Row(
+                Surface(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .fillMaxWidth()
+                        .weight(1f),
+                    color = Color(0xFFFCFEFF),
+                    shape = RoundedCornerShape(5.dp * scale),
+                    border = BorderStroke(1.dp, Color(0xFFC7D1D6)),
+                    shadowElevation = 1.dp,
                 ) {
-                    DxNetAvatar(
-                        profile = profile,
-                        modifier = Modifier.size(84.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column(
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        verticalArrangement = Arrangement.SpaceBetween,
+                            .fillMaxSize()
+                            .padding(7.dp * scale),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        DxNetTitleBadge(
-                            title = profile.title.ifBlank { "DX NET profile" },
-                            imageUrl = profile.titleBackgroundUrl,
+                        DxNetAvatar(
+                            profile = profile,
+                            modifier = Modifier.size(84.dp * scale),
                         )
-                        Row(
+                        Spacer(Modifier.width(8.dp * scale))
+                        Column(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(25.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            verticalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            Surface(
+                            DxNetTitleBadge(
+                                title = profile.title.ifBlank { "DX NET profile" },
+                                imageUrl = profile.titleBackgroundUrl,
+                                scale = scale,
+                            )
+                            Row(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(),
-                                shape = RoundedCornerShape(4.dp),
-                                color = Color.White,
-                                border = BorderStroke(1.dp, Color(0xFFDEDEDE)),
-                                shadowElevation = 1.dp,
+                                    .fillMaxWidth()
+                                    .height(25.dp * scale),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Box(
-                                    modifier = Modifier.padding(horizontal = 7.dp),
-                                    contentAlignment = Alignment.CenterStart,
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    shape = RoundedCornerShape(4.dp * scale),
+                                    color = Color.White,
+                                    border = BorderStroke(1.dp, Color(0xFFDEDEDE)),
+                                    shadowElevation = 1.dp,
                                 ) {
+                                    Box(
+                                        modifier = Modifier.padding(horizontal = 7.dp * scale),
+                                        contentAlignment = Alignment.CenterStart,
+                                    ) {
+                                        Text(
+                                            profile.name,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            fontSize = nameFontSize,
+                                            lineHeight = nameFontSize,
+                                            fontFamily = FontFamily.SansSerif,
+                                            fontWeight = FontWeight.Normal,
+                                            letterSpacing = 0.sp,
+                                            color = Color(0xFF111111),
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.width(6.dp * scale))
+                                DxRatingBadge(
+                                    rating = profile.officialRating,
+                                    imageUrl = profile.ratingBaseUrl,
+                                    scale = scale,
+                                )
+                            }
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp),
+                            ) {
+                                drawLine(
+                                    color = Color(0xFFB7B7B7),
+                                    start = androidx.compose.ui.geometry.Offset.Zero,
+                                    end = androidx.compose.ui.geometry.Offset(size.width, 0f),
+                                    strokeWidth = 1.dp.toPx(),
+                                    cap = StrokeCap.Round,
+                                    pathEffect = PathEffect.dashPathEffect(
+                                        floatArrayOf(1.dp.toPx(), 3.dp.toPx()),
+                                    ),
+                                )
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(25.dp * scale),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                profile.courseRankUrl.takeIf(String::isNotBlank)?.let {
+                                    DxNetRankImage(
+                                        url = it,
+                                        description = "Course rank",
+                                        modifier = Modifier.size(
+                                            width = 63.dp * scale,
+                                            height = 25.dp * scale,
+                                        ),
+                                    )
+                                }
+                                profile.classRankUrl.takeIf(String::isNotBlank)?.let {
+                                    Spacer(Modifier.width(7.dp * scale))
+                                    DxNetRankImage(
+                                        url = it,
+                                        description = "Class rank",
+                                        modifier = Modifier.size(
+                                            width = 45.dp * scale,
+                                            height = 25.dp * scale,
+                                        ),
+                                    )
+                                }
+                                Spacer(Modifier.width(10.dp * scale))
+                                profile.starCount?.let { stars ->
+                                    AsyncImage(
+                                        model = profile.starIconUrl,
+                                        contentDescription = "DX star",
+                                        modifier = Modifier.size(
+                                            width = 23.dp * scale,
+                                            height = 25.dp * scale,
+                                        ),
+                                        contentScale = ContentScale.Fit,
+                                    )
+                                    Spacer(Modifier.width(2.dp * scale))
                                     Text(
-                                        profile.name,
+                                        "×$stars",
                                         maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        fontSize = nameFontSize,
-                                        lineHeight = nameFontSize,
+                                        fontSize = starFontSize,
+                                        lineHeight = starFontSize,
                                         fontFamily = FontFamily.SansSerif,
                                         fontWeight = FontWeight.Normal,
                                         letterSpacing = 0.sp,
-                                        color = Color(0xFF111111),
+                                        color = Color(0xFF202020),
                                     )
                                 }
-                            }
-                            Spacer(Modifier.width(6.dp))
-                            DxRatingBadge(
-                                rating = profile.officialRating,
-                                imageUrl = profile.ratingBaseUrl,
-                            )
-                        }
-                        Canvas(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(1.dp),
-                        ) {
-                            drawLine(
-                                color = Color(0xFFB7B7B7),
-                                start = androidx.compose.ui.geometry.Offset.Zero,
-                                end = androidx.compose.ui.geometry.Offset(size.width, 0f),
-                                strokeWidth = 1.dp.toPx(),
-                                cap = StrokeCap.Round,
-                                pathEffect = PathEffect.dashPathEffect(
-                                    floatArrayOf(1.dp.toPx(), 3.dp.toPx()),
-                                ),
-                            )
-                        }
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(25.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            profile.courseRankUrl.takeIf(String::isNotBlank)?.let {
-                                DxNetRankImage(
-                                    url = it,
-                                    description = "Course rank",
-                                    modifier = Modifier.size(width = 63.dp, height = 25.dp),
-                                )
-                            }
-                            profile.classRankUrl.takeIf(String::isNotBlank)?.let {
-                                Spacer(Modifier.width(7.dp))
-                                DxNetRankImage(
-                                    url = it,
-                                    description = "Class rank",
-                                    modifier = Modifier.size(width = 45.dp, height = 25.dp),
-                                )
-                            }
-                            Spacer(Modifier.width(10.dp))
-                            profile.starCount?.let { stars ->
-                                AsyncImage(
-                                    model = profile.starIconUrl,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(width = 23.dp, height = 25.dp),
-                                    contentScale = ContentScale.Fit,
-                                )
-                                Spacer(Modifier.width(2.dp))
-                                Text(
-                                    "×$stars",
-                                    maxLines = 1,
-                                    fontSize = starFontSize,
-                                    lineHeight = starFontSize,
-                                    fontFamily = FontFamily.SansSerif,
-                                    fontWeight = FontWeight.Normal,
-                                    letterSpacing = 0.sp,
-                                    color = Color(0xFF202020),
-                                )
                             }
                         }
                     }
                 }
-            }
-            if (hasPlayCounts) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                        .padding(horizontal = 7.dp * scale, vertical = 2.dp * scale),
                     horizontalAlignment = Alignment.End,
                 ) {
-                    profile.currentVersionPlayCount?.let { count ->
-                        Text(
-                            "play count of current version : ${formatCount(count)}",
-                            fontSize = 8.sp,
-                            lineHeight = 10.sp,
-                            color = Color(0xFF17455A),
-                        )
-                    }
-                    profile.totalPlayCount?.let { count ->
-                        Text(
-                            "maimaiDX total play count : ${formatCount(count)}",
-                            fontSize = 8.sp,
-                            lineHeight = 10.sp,
-                            color = Color(0xFF17455A),
-                        )
-                    }
+                    Text(
+                        profile.currentVersionPlayCount?.let { count ->
+                            "play count of current version : ${formatCount(count)}"
+                        } ?: " ",
+                        fontSize = 8.sp * scale,
+                        lineHeight = 10.sp * scale,
+                        color = Color(0xFF17455A),
+                    )
+                    Text(
+                        profile.totalPlayCount?.let { count ->
+                            "maimaiDX total play count : ${formatCount(count)}"
+                        } ?: " ",
+                        fontSize = 8.sp * scale,
+                        lineHeight = 10.sp * scale,
+                        color = Color(0xFF17455A),
+                    )
                 }
             }
         }
@@ -3051,12 +3338,12 @@ private fun DxNetProfileCard(
 }
 
 @Composable
-private fun DxNetTitleBadge(title: String, imageUrl: String) {
-    val fontSize = with(LocalDensity.current) { 11.dp.toSp() }
+private fun DxNetTitleBadge(title: String, imageUrl: String, scale: Float) {
+    val fontSize = 11.sp * scale
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(21.dp),
+            .height(21.dp * scale),
         contentAlignment = Alignment.Center,
     ) {
         AsyncImage(
@@ -3076,7 +3363,7 @@ private fun DxNetTitleBadge(title: String, imageUrl: String) {
                 fontFamily = FontFamily.SansSerif,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.sp,
-                drawStyle = Stroke(width = 2f),
+                drawStyle = Stroke(width = 2f * scale),
             ),
         )
         Text(
@@ -3124,12 +3411,12 @@ private fun DxNetAvatar(profile: PlayerProfile, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun DxRatingBadge(rating: Int, imageUrl: String) {
-    val fontSize = with(LocalDensity.current) { 13.dp.toSp() }
+private fun DxRatingBadge(rating: Int, imageUrl: String, scale: Float) {
+    val fontSize = 13.sp * scale
     Box(
         modifier = Modifier
-            .width(73.dp)
-            .height(21.dp),
+            .width(73.dp * scale)
+            .height(21.dp * scale),
         contentAlignment = Alignment.CenterEnd,
     ) {
         AsyncImage(
@@ -3140,14 +3427,14 @@ private fun DxRatingBadge(rating: Int, imageUrl: String) {
         )
         Text(
             rating.toString(),
-            modifier = Modifier.padding(end = 6.dp),
+            modifier = Modifier.padding(end = 6.dp * scale),
             color = Color.White,
             fontFamily = FontFamily.SansSerif,
             fontWeight = FontWeight.Bold,
             fontSize = fontSize,
             lineHeight = fontSize,
             letterSpacing = 0.sp,
-            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            textAlign = TextAlign.End,
         )
     }
 }
@@ -3297,28 +3584,8 @@ private fun ScoreSection(
 ) {
     HorizontalDivider(Modifier.padding(vertical = 12.dp))
     Text("My score", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            String.format(Locale.US, "%.4f%%", score.achievement),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        MedalPill(score.grade.label, MaterialTheme.colorScheme.primaryContainer)
-        if (score.comboMedal != ComboMedal.NONE) MedalPill(score.comboMedal.label, Color(0xFFFFD9E4))
-        if (score.syncMedal != SyncMedal.NONE) MedalPill(score.syncMedal.label, Color(0xFFD4E8FF))
-    }
-    DetailRow(
-        "DX score",
-        dxScoreText(score) + if (score.dxStarCount > 0) "  ${"★".repeat(score.dxStarCount)}" else "",
-    )
-    DetailRow("Chart rating", RatingCalculator.chartRating(chart, score)?.toString() ?: "Unknown constant")
+    Spacer(Modifier.height(8.dp))
+    DxNetScorePanel(chart = chart, score = score)
 
     val bestBreakJudgments = playDetail?.judgments?.breakNotes
     val milestones = remember(chart.chartKey, score, state.scores, bestBreakJudgments) {
@@ -3542,6 +3809,82 @@ internal fun titleWithRomanization(original: String, romanized: String): String 
     return if (containsNonLatinText(original)) "$original ($romanized)" else original
 }
 
+internal fun songIdentityTitle(
+    original: String,
+    romanized: String,
+    meaning: String,
+): String {
+    val title = original.trim().ifBlank { romanized.trim() }
+    if (!containsNonLatinText(title)) return title
+    val reading = romanized.trim().takeUnless { it.equals(title, ignoreCase = true) }.orEmpty()
+    val translation = meaning.trim()
+    if (reading.isBlank() && translation.isBlank()) return title
+    return buildString {
+        append(title)
+        append(" (")
+        if (reading.isNotBlank()) {
+            append(reading)
+        }
+        if (translation.isNotBlank()) {
+            if (reading.isNotBlank()) append(" → ")
+            append('"')
+            append(translation)
+            append('"')
+        }
+        append(')')
+    }
+}
+
+internal fun chihoIsCompleted(
+    title: String,
+    romanized: String,
+    completedNames: Set<String>,
+): Boolean {
+    val expected = setOf(title, romanized)
+        .map(::chihoProgressKey)
+        .filter(String::isNotBlank)
+        .toSet()
+    return completedNames
+        .asSequence()
+        .map(::chihoProgressKey)
+        .any(expected::contains)
+}
+
+private fun chihoProgressKey(value: String): String =
+    normalizeSearch(value)
+        .removeSuffix("ちほー")
+        .removeSuffix("area")
+
+private fun unlockProgressSongKey(value: String): String =
+    normalizeSearch(value)
+        .removeSuffix("dx")
+        .removeSuffix("std")
+
+private fun classBattleScoreKey(
+    title: String,
+    level: String,
+): String = "${unlockProgressSongKey(title)}|${normalizeSearch(level)}"
+
+internal fun classBattleClearedCount(
+    milestones: List<ClassBattleMilestone>,
+    friendClass: String,
+): Int {
+    val normalizedClass = friendClass
+        .uppercase(Locale.ROOT)
+        .filter(Char::isLetterOrDigit)
+    if (normalizedClass == "LEGEND") return milestones.size
+    val exactIndex = milestones.indexOfFirst { it.className == normalizedClass }
+    if (exactIndex >= 0) return exactIndex
+    val tierPattern = when (normalizedClass) {
+        "A" -> Regex("""A[1-5]""")
+        "S" -> Regex("""S[1-5]""")
+        "SS" -> Regex("""SS[1-5]""")
+        "SSS" -> Regex("""SSS[1-5]""")
+        else -> return 0
+    }
+    return milestones.indexOfFirst { tierPattern.matches(it.className) }.coerceAtLeast(0)
+}
+
 private fun containsNonLatinText(value: String): Boolean {
     var offset = 0
     while (offset < value.length) {
@@ -3588,4 +3931,37 @@ private fun difficultyColor(value: String): Color = when (value) {
     "master" -> Color(0xFF7D35BD)
     "remaster" -> Color(0xFF9D50D0)
     else -> Color(0xFF52636F)
+}
+
+private fun chartCardColor(value: String): Color = when (value) {
+    "basic" -> Color(0xFF6FE163)
+    "advanced" -> Color(0xFFF8DF3A)
+    "expert" -> Color(0xFFFF828E)
+    "master" -> Color(0xFFC27FF4)
+    "remaster" -> Color(0xFFE5DDEA)
+    "utage" -> Color(0xFFFF6FFD)
+    else -> Color(0xFFE4EBEF)
+}
+
+private fun chartCardBorderColor(value: String): Color = when (value) {
+    "basic" -> Color(0xFF025235)
+    "advanced" -> Color(0xFFC7450C)
+    "expert" -> Color(0xFFC02138)
+    "master" -> Color(0xFF67148D)
+    "remaster" -> Color(0xFF8C2CD5)
+    "utage" -> Color(0xFFD00BB1)
+    else -> Color(0xFF52636F)
+}
+
+private fun scorePanelColor(grade: Grade): Color = when (grade) {
+    Grade.SSS_PLUS,
+    Grade.SSS,
+    -> Color(0xFFFFF1C7)
+    Grade.SS_PLUS,
+    Grade.SS,
+    -> Color(0xFFDDEBFF)
+    Grade.S_PLUS,
+    Grade.S,
+    -> Color(0xFFFFE1E8)
+    else -> Color.White.copy(alpha = 0.9f)
 }

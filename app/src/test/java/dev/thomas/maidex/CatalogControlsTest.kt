@@ -1,6 +1,7 @@
 package dev.thomas.maidex
 
 import dev.thomas.maidex.data.ChartFilters
+import dev.thomas.maidex.data.ClassBattleMetadata
 import dev.thomas.maidex.data.ChartSort
 import dev.thomas.maidex.data.ComboMedal
 import dev.thomas.maidex.data.ConstantAvailability
@@ -11,7 +12,10 @@ import dev.thomas.maidex.data.SongChart
 import dev.thomas.maidex.data.SortOrder
 import dev.thomas.maidex.data.SyncMedal
 import dev.thomas.maidex.data.UserScore
+import dev.thomas.maidex.ui.chihoIsCompleted
+import dev.thomas.maidex.ui.classBattleClearedCount
 import dev.thomas.maidex.ui.titleWithRomanization
+import dev.thomas.maidex.ui.songIdentityTitle
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -99,6 +103,60 @@ class CatalogControlsTest {
         )
         assertEquals("削除 (sakujo)", titleWithRomanization("削除", "sakujo"))
         assertEquals("(no title)", titleWithRomanization("\u3000", "(no title)"))
+    }
+
+    @Test
+    fun `chart identity combines Japanese reading and quoted meaning`() {
+        assertEquals(
+            "零號車輛 (Linghao cheliang → \"Vehicle Number Zero\")",
+            songIdentityTitle(
+                original = "零號車輛",
+                romanized = "Linghao cheliang",
+                meaning = "Vehicle Number Zero",
+            ),
+        )
+        assertEquals(
+            "削除 (sakujo)",
+            songIdentityTitle("削除", "sakujo", ""),
+        )
+        assertEquals(
+            "Daredevil Glaive",
+            songIdentityTitle("Daredevil Glaive", "Daredevil Glaive", "Daredevil Glaive"),
+        )
+    }
+
+    @Test
+    fun `unlock progress matches completed Chihos and current class`() {
+        assertEquals(
+            true,
+            chihoIsCompleted(
+                title = "トリコロちほー",
+                romanized = "Tricolo Area",
+                completedNames = setOf("トリコロちほー"),
+            ),
+        )
+        assertEquals(
+            true,
+            chihoIsCompleted(
+                title = "トリコロちほー",
+                romanized = "Tricolo Area",
+                completedNames = setOf("Tricolo Area"),
+            ),
+        )
+        assertEquals(
+            false,
+            chihoIsCompleted(
+                title = "トリコロちほー",
+                romanized = "Tricolo Area",
+                completedNames = setOf("ONGEKI Area 9"),
+            ),
+        )
+
+        val currentMilestones = ClassBattleMetadata.byVersion.getValue("CiRCLE PLUS")
+        assertEquals(5, classBattleClearedCount(currentMilestones, "S5"))
+        assertEquals(5, classBattleClearedCount(currentMilestones, "S"))
+        assertEquals(19, classBattleClearedCount(currentMilestones, "SSS1"))
+        assertEquals(20, classBattleClearedCount(currentMilestones, "LEGEND"))
     }
 
     private fun score(chart: SongChart, dxScore: Int) = UserScore(

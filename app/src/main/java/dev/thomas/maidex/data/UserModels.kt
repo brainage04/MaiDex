@@ -115,6 +115,8 @@ data class PlayerProfile(
     val titleBackgroundUrl: String = "",
     val ratingBaseUrl: String = "",
     val starIconUrl: String = "",
+    val completedChihoNames: Set<String> = emptySet(),
+    val friendClass: String = "",
     val currentVersionPlayCount: Int? = null,
     val totalPlayCount: Int? = null,
     val importedAt: Long = Instant.now().toEpochMilli(),

@@ -47,6 +47,57 @@ class UserDataRepositoryTest {
         }
     }
 
+    @Test
+    fun trackingSnapshotsPreserveCompletedChihosAndLatestFriendClass() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repository = UserDataRepository(context)
+        repository.clear()
+        try {
+            repository.saveTrackingSnapshot(
+                profile = progressProfile(
+                    completedChihos = setOf("トリコロちほー"),
+                    friendClass = "S5",
+                ),
+                circle = null,
+            )
+            repository.saveTrackingSnapshot(
+                profile = progressProfile(),
+                circle = null,
+            )
+
+            assertEquals(setOf("トリコロちほー"), repository.loadProfile()?.completedChihoNames)
+            assertEquals("S5", repository.loadProfile()?.friendClass)
+
+            repository.saveTrackingSnapshot(
+                profile = progressProfile(
+                    completedChihos = setOf("オンゲキちほー9"),
+                    friendClass = "SS1",
+                ),
+                circle = null,
+            )
+
+            assertEquals(
+                setOf("トリコロちほー", "オンゲキちほー9"),
+                repository.loadProfile()?.completedChihoNames,
+            )
+            assertEquals("SS1", repository.loadProfile()?.friendClass)
+        } finally {
+            repository.clear()
+        }
+    }
+
+    private fun progressProfile(
+        completedChihos: Set<String> = emptySet(),
+        friendClass: String = "",
+    ) = PlayerProfile(
+        name = "Player",
+        officialRating = 16_000,
+        region = AccountRegion.INTERNATIONAL,
+        completedChihoNames = completedChihos,
+        friendClass = friendClass,
+        importedAt = Instant.parse("2026-08-03T07:00:00Z").toEpochMilli(),
+    )
+
     private fun saveSnapshot(
         repository: UserDataRepository,
         month: String,

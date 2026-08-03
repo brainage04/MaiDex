@@ -8,7 +8,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 
 class UserDataRepository(context: Context) {
@@ -72,6 +71,11 @@ class UserDataRepository(context: Context) {
             ratingBaseUrl = preferences.getString("rating_base_url", "").orEmpty(),
             starIconUrl = preferences.getString("star_icon_url", "").orEmpty(),
             classRankUrl = preferences.getString("class_rank_url", "").orEmpty(),
+            completedChihoNames = preferences
+                .getStringSet("completed_chiho_names", emptySet())
+                .orEmpty()
+                .toSet(),
+            friendClass = preferences.getString("friend_class", "").orEmpty(),
             currentVersionPlayCount = preferences.getInt("current_version_play_count", -1).takeIf { it >= 0 },
             totalPlayCount = preferences.getInt("total_play_count", -1).takeIf { it >= 0 },
             importedAt = preferences.getLong("imported_at", 0L),
@@ -131,7 +135,7 @@ class UserDataRepository(context: Context) {
     )
 
     fun saveImport(result: ImportResult): PlayerProfile {
-        val profile = profileAssetCache.cache(result.profile)
+        val profile = profileAssetCache.cache(mergeProgress(result.profile))
         helper.writableDatabase.transaction {
             delete("scores", null, null)
             result.scores.forEach { score ->
@@ -173,12 +177,22 @@ class UserDataRepository(context: Context) {
     }
 
     fun saveTrackingSnapshot(profile: PlayerProfile, circle: CircleData?): PlayerProfile {
-        val cachedProfile = profileAssetCache.cache(profile)
+        val cachedProfile = profileAssetCache.cache(mergeProgress(profile))
         helper.writableDatabase.transaction {
             saveTrackingRows(cachedProfile, circle)
         }
         saveProfile(cachedProfile)
         return cachedProfile
+    }
+
+    private fun mergeProgress(profile: PlayerProfile): PlayerProfile {
+        val existing = loadProfile()
+        return profile.copy(
+            completedChihoNames = existing
+                ?.completedChihoNames
+                .orEmpty() + profile.completedChihoNames,
+            friendClass = profile.friendClass.ifBlank { existing?.friendClass.orEmpty() },
+        )
     }
 
     fun setTrackingHour(hour: Int) {
@@ -213,6 +227,8 @@ class UserDataRepository(context: Context) {
             .putString("title_background_url", profile.titleBackgroundUrl)
             .putString("rating_base_url", profile.ratingBaseUrl)
             .putString("star_icon_url", profile.starIconUrl)
+            .putStringSet("completed_chiho_names", profile.completedChihoNames)
+            .putString("friend_class", profile.friendClass)
             .putLong("imported_at", profile.importedAt)
         profile.starCount?.let { editor.putInt("star_count", it) }
             ?: editor.remove("star_count")
@@ -350,10 +366,11 @@ private fun SQLiteDatabase.saveTrackingRows(profile: PlayerProfile, circle: Circ
     }
 }
 
-private fun dayOf(timestamp: Long): String = LocalDate.ofInstant(
-    Instant.ofEpochMilli(timestamp),
-    ZoneId.systemDefault(),
-).toString()
+private fun dayOf(timestamp: Long): String =
+    Instant.ofEpochMilli(timestamp)
+        .atZone(ZoneId.systemDefault())
+        .toLocalDate()
+        .toString()
 
 private fun encodeCircle(circle: CircleData): String = JSONObject().apply {
     put("month", circle.month)
