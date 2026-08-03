@@ -7,6 +7,8 @@ import dev.thomas.maidex.data.AccountRegion
 import dev.thomas.maidex.data.CatalogInfo
 import dev.thomas.maidex.data.CatalogRepository
 import dev.thomas.maidex.data.ChartFilters
+import dev.thomas.maidex.data.CircleDailySnapshot
+import dev.thomas.maidex.data.CircleData
 import dev.thomas.maidex.data.ChartSort
 import dev.thomas.maidex.data.ConstantAvailability
 import dev.thomas.maidex.data.SortOrder
@@ -14,11 +16,14 @@ import dev.thomas.maidex.data.FilterOptions
 import dev.thomas.maidex.data.SongChart
 import dev.thomas.maidex.data.PlayDetail
 import dev.thomas.maidex.data.PlayerProfile
+import dev.thomas.maidex.data.PlayCountSnapshot
 import dev.thomas.maidex.data.UserDataRepository
+import dev.thomas.maidex.data.TrackingSettings
 import dev.thomas.maidex.data.UserScore
 import dev.thomas.maidex.network.MaimaiDxClient
 import dev.thomas.maidex.rating.RatingCalculator
 import dev.thomas.maidex.data.normalizeSearch
+import dev.thomas.maidex.tracking.CircleTrackingScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,14 +45,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val playDetails = MutableStateFlow<Map<String, PlayDetail>>(emptyMap())
     private val profile = MutableStateFlow<PlayerProfile?>(null)
     private val importStatus = MutableStateFlow<ImportStatus>(ImportStatus.Idle)
+    private val circleHistory = MutableStateFlow<List<CircleData>>(emptyList())
+    private val circleSnapshots = MutableStateFlow<List<CircleDailySnapshot>>(emptyList())
+    private val playCountSnapshots = MutableStateFlow<List<PlayCountSnapshot>>(emptyList())
+    private val trackingSettings = MutableStateFlow(TrackingSettings())
 
-    private val playerData = combine(scores, playDetails, profile, importStatus) {
+    private val trackingData = combine(
+        circleHistory,
+        circleSnapshots,
+        playCountSnapshots,
+        trackingSettings,
+    ) { history, circlePoints, playCounts, settings ->
+        TrackingData(history, circlePoints, playCounts, settings)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, TrackingData())
+
+    private val playerData = combine(scores, playDetails, profile, importStatus, trackingData) {
             currentScores,
             currentDetails,
             currentProfile,
             currentImportStatus,
+            currentTracking,
         ->
-        PlayerData(currentScores, currentDetails, currentProfile, currentImportStatus)
+        PlayerData(
+            currentScores,
+            currentDetails,
+            currentProfile,
+            currentImportStatus,
+            currentTracking,
+        )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, PlayerData())
 
     val uiState: StateFlow<CatalogUiState> = combine(snapshot, filters, sorting, error, playerData) {
@@ -83,6 +108,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 calculatedRating = RatingCalculator.totalRating(loaded.charts, player.scores, newVersions),
                 newVersions = newVersions,
                 importStatus = player.importStatus,
+                circleHistory = player.tracking.circleHistory,
+                circleSnapshots = player.tracking.circleSnapshots,
+                playCountSnapshots = player.tracking.playCountSnapshots,
+                trackingSettings = player.tracking.settings,
                 error = failure,
             )
         }
@@ -114,6 +143,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 playDetails.value = userRepository.loadPlayDetails()
                 profile.value = userRepository.loadProfile()
             }
+            reloadTrackingData()
+            profile.value?.let {
+                CircleTrackingScheduler.schedule(application, trackingSettings.value.syncHour)
+            }
         }
     }
 
@@ -142,9 +175,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun toggleUtageVisibility() {
-        filters.value = filters.value.copy(showUtage = !filters.value.showUtage)
-    }
 
     fun importAccount(region: AccountRegion) {
         val charts = snapshot.value?.charts ?: return
@@ -161,6 +191,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 scores.value = result.scores.associateBy(UserScore::chartKey)
                 playDetails.value = withContext(Dispatchers.IO) { userRepository.loadPlayDetails() }
                 profile.value = result.profile
+                reloadTrackingData()
+                CircleTrackingScheduler.schedule(
+                    getApplication(),
+                    trackingSettings.value.syncHour,
+                )
                 importStatus.value = ImportStatus.Success(
                     imported = result.scores.size,
                     recentDetails = result.playDetails.size,
@@ -181,7 +216,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             playDetails.value = emptyMap()
             profile.value = null
             importStatus.value = ImportStatus.Idle
+            circleHistory.value = emptyList()
+            circleSnapshots.value = emptyList()
+            playCountSnapshots.value = emptyList()
+            trackingSettings.value = TrackingSettings()
+            CircleTrackingScheduler.cancel(getApplication())
         }
+    }
+
+    fun setTrackingHour(hour: Int) {
+        val safeHour = hour.coerceIn(0, 23)
+        userRepository.setTrackingHour(safeHour)
+        trackingSettings.value = userRepository.loadTrackingSettings()
+        if (profile.value != null) {
+            CircleTrackingScheduler.schedule(getApplication(), safeHour)
+        }
+    }
+
+    fun refreshTrackingData() {
+        viewModelScope.launch { reloadTrackingData() }
+    }
+
+    private suspend fun reloadTrackingData() {
+        val loaded = withContext(Dispatchers.IO) {
+            TrackingData(
+                circleHistory = userRepository.loadCircleHistory(),
+                circleSnapshots = userRepository.loadCircleSnapshots(),
+                playCountSnapshots = userRepository.loadPlayCountSnapshots(),
+                settings = userRepository.loadTrackingSettings(),
+            )
+        }
+        circleHistory.value = loaded.circleHistory
+        circleSnapshots.value = loaded.circleSnapshots
+        playCountSnapshots.value = loaded.playCountSnapshots
+        trackingSettings.value = loaded.settings
     }
 
     fun dismissImportStatus() {
@@ -205,6 +273,10 @@ data class CatalogUiState(
     val calculatedRating: Int = 0,
     val newVersions: Set<String> = emptySet(),
     val importStatus: ImportStatus = ImportStatus.Idle,
+    val circleHistory: List<CircleData> = emptyList(),
+    val circleSnapshots: List<CircleDailySnapshot> = emptyList(),
+    val playCountSnapshots: List<PlayCountSnapshot> = emptyList(),
+    val trackingSettings: TrackingSettings = TrackingSettings(),
     val error: String? = null,
 )
 
@@ -222,6 +294,13 @@ private data class PlayerData(
     val playDetails: Map<String, PlayDetail> = emptyMap(),
     val profile: PlayerProfile? = null,
     val importStatus: ImportStatus = ImportStatus.Idle,
+    val tracking: TrackingData = TrackingData(),
+)
+private data class TrackingData(
+    val circleHistory: List<CircleData> = emptyList(),
+    val circleSnapshots: List<CircleDailySnapshot> = emptyList(),
+    val playCountSnapshots: List<PlayCountSnapshot> = emptyList(),
+    val settings: TrackingSettings = TrackingSettings(),
 )
 
 sealed interface ImportStatus {

@@ -33,15 +33,18 @@ data class BestScore(
 
 data class ScoreAnalyticsSummary(
     val playedCharts: Int,
-    val highLevels: MedalLevelTable,
-    val lowerLevels: MedalLevelTable,
+    val levelTables: List<MedalLevelTable>,
     val utage: MedalLevelTable,
     val bestScores: List<BestScore>,
 )
 
 object ScoreAnalytics {
-    val highLevels = listOf("11+", "12", "12+", "13", "13+", "14", "14+", "15")
-    val lowerLevels = listOf("7+", "8", "8+", "9", "9+", "10", "10+", "11")
+    val standardLevelBands = listOf(
+        listOf("13", "13+", "14", "14+", "15"),
+        listOf("10", "10+", "11", "11+", "12", "12+"),
+        listOf("7", "7+", "8", "8+", "9", "9+"),
+        listOf("1", "2", "3", "4", "5", "6"),
+    )
     val utageLevels = listOf("10?", "11?", "11+?", "12?", "12+?", "13?", "13+?", "14?", "14+?", "*")
 
     fun summarize(
@@ -53,18 +56,18 @@ object ScoreAnalytics {
         }
         return ScoreAnalyticsSummary(
             playedCharts = scoredCharts.size,
-            highLevels = medalTable(
-                title = "High levels",
-                levels = highLevels,
-                scoredCharts = scoredCharts,
-                levelOf = { it.chart.level.takeIf { level -> it.chart.type != "utage" && level in highLevels } },
-            ),
-            lowerLevels = medalTable(
-                title = "Lower levels",
-                levels = lowerLevels,
-                scoredCharts = scoredCharts,
-                levelOf = { it.chart.level.takeIf { level -> it.chart.type != "utage" && level in lowerLevels } },
-            ),
+            levelTables = standardLevelBands.mapIndexed { index, levels ->
+                medalTable(
+                    title = "Levels ${levels.first()}–${levels.last()} · ${index + 1}/${standardLevelBands.size}",
+                    levels = levels,
+                    scoredCharts = scoredCharts,
+                    levelOf = { scoredChart ->
+                        scoredChart.chart.level.takeIf { level ->
+                            scoredChart.chart.type != "utage" && level in levels
+                        }
+                    },
+                )
+            },
             utage = medalTable(
                 title = "UTAGE estimated levels",
                 levels = utageLevels,

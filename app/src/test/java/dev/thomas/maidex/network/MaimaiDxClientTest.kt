@@ -35,6 +35,8 @@ class MaimaiDxClientTest {
               <img class="p_l_10 h_35 f_l" src="/maimai-mobile/img/class.png">
               <div class="p_l_10 f_l f_14">×355</div>
             </div>
+            <div>play count of current version : 16</div>
+            <div>maimaiDX total play count : 2,203</div>
             """.trimIndent(),
             "https://maimaidx-eng.com/maimai-mobile/home/",
         )
@@ -53,6 +55,8 @@ class MaimaiDxClientTest {
         assertEquals("gold", profile.titleRarity)
         assertEquals("https://maimaidx-eng.com/maimai-mobile/img/course.png", profile.courseRankUrl)
         assertEquals("https://maimaidx-eng.com/maimai-mobile/img/class.png", profile.classRankUrl)
+        assertEquals(16, profile.currentVersionPlayCount)
+        assertEquals(2_203, profile.totalPlayCount)
         assertEquals(123L, profile.importedAt)
     }
 
@@ -75,6 +79,86 @@ class MaimaiDxClientTest {
             "https://maimaidx-eng.com/maimai-mobile/img/Icon/c5f687e5d0da9696.png",
             profile.avatarUrl,
         )
+    }
+
+    @Test
+    fun `circle parser keeps profile points rank rewards members and page details`() {
+        val document = Jsoup.parse(
+            """
+            <main class="main_wrapper">
+              <img class="title" src="/maimai-mobile/img/title_circle.png">
+              <section class="circle_profile">
+                <div class="circle_name_block">Test Circle</div>
+                <div class="circle_code_block">Circle code: ABCDEFGH</div>
+                <div class="circle_leader">Leader: B r a i n a g e</div>
+                <div class="circle_comment">Comment: Play together!</div>
+                <span class="circle_tag">Beginners welcome</span>
+                <div class="circle_class_table">
+                  <span>Circle class</span><span>Gold</span>
+                </div>
+              </section>
+              <section class="point_panel">
+                <div class="circle_totalpoint_header_for_index">September Circle cumulative points</div>
+                <strong>1,500 PT</strong>
+                <div>Circle point reset in 12 days</div>
+              </section>
+              <section class="rank_panel">
+                <div class="circle_pointranking_header">Current regional ranking</div>
+                <strong>15th</strong>
+                <div>2025/09/18 04:00 updated</div>
+              </section>
+              <div>Next reward in 400 PT</div>
+              <div>Members: 2</div>
+              <div class="circle_member_row">
+                <span class="member_name">B r a i n a g e</span>
+                <span>Leader</span><span>900 PT</span>
+              </div>
+              <div class="circle_member_row">
+                <span class="member_name">Other player</span>
+                <span>Member</span><span>600 PT</span>
+              </div>
+              <section class="reward_page">
+                <h2>Circle point rewards</h2>
+                <div class="circle_reward"><b>500 PT</b><img alt="200 mai-mile" src="/reward.png"></div>
+                <div class="circle_reward"><b>2,000 PT</b><img alt="Frame" src="/frame.png"></div>
+              </section>
+              <table><tr><th>Region</th><td>International</td></tr></table>
+            </main>
+            """.trimIndent(),
+            "https://maimaidx-eng.com/maimai-mobile/circle/",
+        )
+
+        val circle = extractCircleData(
+            documents = listOf(document),
+            playerName = "B r a i n a g e",
+            importedAt = 1_758_153_600_000L,
+        )!!
+
+        assertEquals("2025-09", circle.month)
+        assertEquals("Test Circle", circle.name)
+        assertEquals("ABCDEFGH", circle.code)
+        assertEquals("B r a i n a g e", circle.leader)
+        assertEquals("Play together!", circle.comment)
+        assertEquals("Gold", circle.circleClass)
+        assertEquals(1_500, circle.totalPoints)
+        assertEquals(15, circle.regionalRank)
+        assertEquals(12, circle.daysUntilReset)
+        assertEquals(400, circle.nextRewardPoints)
+        assertEquals(listOf(900, 600), circle.members.map { it.points })
+        assertEquals(true, circle.members.first().isCurrentUser)
+        assertEquals(listOf(500, 2_000), circle.rewards.map { it.pointsRequired })
+        assertEquals(listOf(true, false), circle.rewards.map { it.earned })
+        assertEquals("International", circle.information.single { it.label == "Region" }.value)
+        assertEquals(true, circle.pages.single().text.contains("Beginners welcome"))
+    }
+
+    @Test
+    fun `circle parser returns null when DX NET says the player has no circle`() {
+        val document = Jsoup.parse(
+            """<main class="main_wrapper">You are currently not in a circle.</main>""",
+        )
+
+        assertEquals(null, extractCircleData(listOf(document), "Player", importedAt = 123L))
     }
 
 }

@@ -2,6 +2,11 @@ package dev.thomas.maidex.network
 
 import android.webkit.CookieManager
 import dev.thomas.maidex.data.AccountRegion
+import dev.thomas.maidex.data.CircleData
+import dev.thomas.maidex.data.CircleInfoItem
+import dev.thomas.maidex.data.CircleMember
+import dev.thomas.maidex.data.CirclePageInfo
+import dev.thomas.maidex.data.CircleReward
 import dev.thomas.maidex.data.ComboMedal
 import dev.thomas.maidex.data.Grade
 import dev.thomas.maidex.data.ImportResult
@@ -21,6 +26,10 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.time.Instant
+import java.net.URI
+import java.time.YearMonth
+import java.time.ZoneId
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class MaimaiDxClient(
@@ -32,19 +41,36 @@ class MaimaiDxClient(
         .followRedirects(true)
         .build()
 
+    suspend fun syncAccount(region: AccountRegion): AccountSyncResult = withContext(Dispatchers.IO) {
+        requireAuthenticatedCookie(region)
+        val home = getDocument(region, "/maimai-mobile/home/")
+        val profile = extractPlayerProfile(home, region)
+            ?: throw AuthenticationRequiredException("DX NET login expired; sign in again")
+        val circle = extractCircleData(
+            documents = getCircleDocuments(region),
+            playerName = profile.name,
+            importedAt = profile.importedAt,
+        )
+        AccountSyncResult(profile, circle)
+    }
+
     suspend fun import(
         region: AccountRegion,
         charts: List<SongChart>,
         onProgress: (String) -> Unit,
     ): ImportResult = withContext(Dispatchers.IO) {
-        if (cookieManager.getCookie(region.loginUrl).isNullOrBlank()) {
-            throw AuthenticationRequiredException("Sign in to DX NET before importing")
-        }
+        requireAuthenticatedCookie(region)
         val lookup = ChartLookup(charts)
         onProgress("Checking DX NET login…")
         val home = getDocument(region, "/maimai-mobile/home/")
         val profile = extractPlayerProfile(home, region)
             ?: throw AuthenticationRequiredException("DX NET login expired; sign in again")
+        onProgress("Importing circle data…")
+        val circle = extractCircleData(
+            documents = getCircleDocuments(region),
+            playerName = profile.name,
+            importedAt = profile.importedAt,
+        )
 
         val scores = LinkedHashMap<String, UserScore>()
         var unmatched = 0
@@ -108,7 +134,41 @@ class MaimaiDxClient(
             scores = scores.values.toList(),
             playDetails = details,
             unmatchedCharts = unmatched,
+            circle = circle,
         )
+    }
+
+    private fun requireAuthenticatedCookie(region: AccountRegion) {
+        if (cookieManager.getCookie(region.loginUrl).isNullOrBlank()) {
+            throw AuthenticationRequiredException("Sign in to DX NET before importing")
+        }
+    }
+
+    private fun getCircleDocuments(region: AccountRegion): List<Document> {
+        val main = getDocument(region, "/maimai-mobile/circle/")
+        val linkedUrls = linkedSetOf<String>()
+        main.select("a[href]").forEach { link ->
+            link.absUrl("href").takeIf(String::isNotBlank)?.let(linkedUrls::add)
+        }
+        main.select("form[action]").forEach { form ->
+            if (!form.attr("method").equals("post", ignoreCase = true)) {
+                form.absUrl("action").takeIf(String::isNotBlank)?.let(linkedUrls::add)
+            }
+        }
+        Regex("""location(?:\.href)?\s*=\s*['"]([^'"]+)['"]""")
+            .findAll(main.html())
+            .map { match -> URI(main.location()).resolve(match.groupValues[1]).toString() }
+            .forEach(linkedUrls::add)
+
+        val safePages = linkedUrls.asSequence()
+            .filter { url -> url.startsWith("${region.baseUrl}/maimai-mobile/circle") }
+            .filterNot { url -> url.substringBefore('?').trimEnd('/') == main.location().substringBefore('?').trimEnd('/') }
+            .filterNot(::isCircleMutationUrl)
+            .distinct()
+            .take(12)
+            .mapNotNull { url -> runCatching { getDocument(region, url) }.getOrNull() }
+            .toList()
+        return listOf(main) + safePages
     }
 
     private fun getDocument(region: AccountRegion, path: String): Document {
@@ -232,6 +292,374 @@ class MaimaiDxClient(
         )
     }
 }
+data class AccountSyncResult(
+    val profile: PlayerProfile,
+    val circle: CircleData?,
+)
+
+private fun isCircleMutationUrl(url: String): Boolean {
+    val value = url.lowercase(Locale.ROOT)
+    return listOf(
+        "create",
+        "edit",
+        "save",
+        "update",
+        "join",
+        "leave",
+        "withdraw",
+        "disband",
+        "delete",
+        "invite",
+        "transfer",
+        "recruit",
+        "search",
+    ).any(value::contains)
+}
+
+internal fun extractCircleData(
+    documents: List<Document>,
+    playerName: String,
+    importedAt: Long = Instant.now().toEpochMilli(),
+): CircleData? {
+    if (documents.isEmpty()) return null
+    val pageText = documents.joinToString(" ") { it.text().normalizedWhitespace() }
+    if (Regex(
+            """(?:currently\s+not\s+in\s+a\s+circle|not\s+participating\s+in\s+a\s+circle|サークルに所属していません)""",
+            RegexOption.IGNORE_CASE,
+        ).containsMatchIn(pageText)
+    ) {
+        return null
+    }
+
+    fun selectedText(selector: String): String = documents.asSequence()
+        .flatMap { it.select(selector).asSequence() }
+        .map { it.text().normalizedWhitespace() }
+        .firstOrNull(String::isNotBlank)
+        .orEmpty()
+
+    val name = selectedText(
+        ".circle_name_block, [class*=circle_name], [id*=circle_name]",
+    ).stripLabels("Circle name", "サークル名").ifBlank {
+        Regex(
+            """(?:Circle\s*name|サークル名)\s*[:：]?\s*(.+?)(?=\s+(?:Circle\s*code|サークルコード|Leader|リーダー)\b|$)""",
+            RegexOption.IGNORE_CASE,
+        ).find(pageText)?.groupValues?.get(1)?.trim().orEmpty()
+    }
+    val code = selectedText(
+        ".circle_code_block, [class*=circle_code], [id*=circle_code]",
+    ).stripLabels("Circle code", "サークルコード").ifBlank {
+        Regex(
+            """(?:Circle\s*code|サークルコード)\s*[:：]?\s*([A-Z0-9]{4,20})""",
+            RegexOption.IGNORE_CASE,
+        ).find(pageText)?.groupValues?.get(1).orEmpty()
+    }
+    val totalPoints = pointsNear(documents, ".circle_totalpoint_header_for_index")
+        ?: Regex(
+            """(?:circle\s+(?:cumulative|total)\s+points?|サークル累計ポイント)[^0-9]{0,80}([\d,]+)\s*PT""",
+            RegexOption.IGNORE_CASE,
+        ).find(pageText)?.groupValues?.get(1).parseOptionalInt()
+        ?: 0
+    val regionalRank = integerNear(documents, ".circle_pointranking_header", """([\d,]+)\s*(?:st|nd|rd|th|位)?""")
+        ?: Regex(
+            """(?:current|regional|circle)\s+(?:point\s+)?ranking[^0-9]{0,80}([\d,]+)|現在のランキング[^0-9]{0,40}([\d,]+)""",
+            RegexOption.IGNORE_CASE,
+        ).find(pageText)?.groupValues?.drop(1)?.firstOrNull(String::isNotBlank).parseOptionalInt()
+    val rankingLabel = selectedText(".circle_pointranking_header")
+        .ifBlank { if (regionalRank == null) "" else "Current regional ranking" }
+    val leader = selectedText("[class*=circle_leader], [id*=circle_leader]")
+        .stripLabels("Leader", "リーダー")
+        .ifBlank {
+            Regex(
+                """(?:Leader|リーダー)\s*[:：]?\s*(.+?)(?=\s+(?:Comment|Circle\s*comment|サークルコメント|Tags?|$))""",
+                RegexOption.IGNORE_CASE,
+            ).find(pageText)?.groupValues?.get(1)?.trim().orEmpty()
+        }
+    val comment = selectedText("[class*=circle_comment], [id*=circle_comment]")
+        .stripLabels("Circle comment", "Comment", "サークルコメント")
+    val tags = documents.asSequence()
+        .flatMap { document ->
+            document.select("[class*=circle_tag], [class*=circle_genre]").asSequence()
+        }
+        .map { it.text().normalizedWhitespace() }
+        .filter { it.isNotBlank() && it.length <= 60 }
+        .distinct()
+        .toList()
+    val circleClass = selectedText(".circle_class_table, [class*=circle_class]")
+        .stripLabels("Circle class", "Class", "サークルクラス")
+    val memberCount = Regex(
+        """(?:members?|メンバー数)\s*[:：]?\s*(\d{1,3})""",
+        RegexOption.IGNORE_CASE,
+    ).find(pageText)?.groupValues?.get(1).parseOptionalInt()
+    val daysUntilReset = Regex(
+        """(?:reset[^0-9]{0,30}(?:in|after)?|リセットまで\s*あと?)\s*(\d{1,3})\s*(?:days?|日)""",
+        RegexOption.IGNORE_CASE,
+    ).find(pageText)?.groupValues?.get(1).parseOptionalInt()
+    val nextRewardPoints = Regex(
+        """(?:next\s+reward|次の報酬)[^0-9]{0,40}([\d,]+)\s*PT""",
+        RegexOption.IGNORE_CASE,
+    ).find(pageText)?.groupValues?.get(1).parseOptionalInt()
+    val updatedAt = Regex("""20\d{2}[/-]\d{1,2}[/-]\d{1,2}(?:\s+\d{1,2}:\d{2})?""")
+        .find(pageText)?.value.orEmpty()
+    val resolvedName = name.ifBlank {
+        if (code.isNotBlank() || totalPoints > 0 || regionalRank != null) "Your circle" else return null
+    }
+
+    val information = linkedMapOf<String, String>()
+    documents.forEach { document ->
+        document.select("tr").forEach { row ->
+            val cells = row.children().filter { it.tagName() == "th" || it.tagName() == "td" }
+            if (cells.size >= 2) {
+                information.putIfUseful(cells.first().text(), cells.drop(1).joinToString(" ") { it.text() })
+            }
+        }
+        document.select("dt").forEach { label ->
+            information.putIfUseful(label.text(), label.nextElementSibling()?.text().orEmpty())
+        }
+        document.select(".circle_class_table").forEach { table ->
+            table.children().chunked(2).forEach { pair ->
+                if (pair.size == 2) information.putIfUseful(pair[0].text(), pair[1].text())
+            }
+        }
+    }
+    information.putIfUseful("Circle name", resolvedName)
+    information.putIfUseful("Circle code", code)
+    information.putIfUseful("Leader", leader)
+    information.putIfUseful("Comment", comment)
+    information.putIfUseful("Circle class", circleClass)
+    information.putIfUseful("Total circle points", totalPoints.takeIf { it > 0 }?.toString().orEmpty())
+    information.putIfUseful("Regional rank", regionalRank?.toString().orEmpty())
+    information.putIfUseful("Members", memberCount?.toString().orEmpty())
+    information.putIfUseful("Days until reset", daysUntilReset?.toString().orEmpty())
+    information.putIfUseful("Points until next reward", nextRewardPoints?.toString().orEmpty())
+    information.putIfUseful("Last updated by DX NET", updatedAt)
+
+    val pages = documents.map { document ->
+        val content = (document.selectFirst(".main_wrapper") ?: document.body()).clone()
+        content.select("script, style, header, footer, #page-top, #page-bottom").remove()
+        CirclePageInfo(
+            title = circlePageTitle(document),
+            text = content.text().normalizedWhitespace(),
+        )
+    }.filter { it.text.isNotBlank() }.distinctBy { it.title to it.text }
+
+    val members = extractCircleMembers(documents, playerName)
+    val rewards = extractCircleRewards(documents, totalPoints)
+    return CircleData(
+        month = circleMonth(pageText, importedAt),
+        name = resolvedName,
+        code = code,
+        leader = leader,
+        comment = comment,
+        tags = tags,
+        circleClass = circleClass,
+        totalPoints = totalPoints,
+        regionalRank = regionalRank,
+        rankingLabel = rankingLabel,
+        memberCount = memberCount ?: members.size.takeIf { members.isNotEmpty() },
+        daysUntilReset = daysUntilReset,
+        nextRewardPoints = nextRewardPoints,
+        updatedAt = updatedAt,
+        characterUrl = documents.firstNotNullOfOrNull { document ->
+            document.selectFirst("[class*=circle] img[src*=Chara], [class*=circle] img[src*=chara]").imageUrl()
+                .takeIf(String::isNotBlank)
+        }.orEmpty(),
+        backgroundUrl = documents.firstNotNullOfOrNull { document ->
+            document.selectFirst("[class*=circle] img[src*=Background], [class*=circle] img[src*=background]").imageUrl()
+                .takeIf(String::isNotBlank)
+        }.orEmpty(),
+        members = members,
+        rewards = rewards,
+        information = information.map { (label, value) -> CircleInfoItem(label, value) },
+        pages = pages,
+        importedAt = importedAt,
+    )
+}
+
+private fun extractCircleMembers(documents: List<Document>, playerName: String): List<CircleMember> {
+    val pointPattern = Regex("""([\d,]+)\s*(?:PT|points?)\b""", RegexOption.IGNORE_CASE)
+    return documents.asSequence()
+        .flatMap { document ->
+            document.select("[class*=circle_member], [class*=member_block], [class*=member_row], tr").asSequence()
+        }
+        .mapNotNull { block ->
+            val text = block.text().normalizedWhitespace()
+            val pointMatch = pointPattern.find(text) ?: return@mapNotNull null
+            if (Regex(
+                    """circle\s+(?:total|cumulative)|ranking|reward|reset|サークル累計|ランキング|報酬""",
+                    RegexOption.IGNORE_CASE,
+                ).containsMatchIn(text)
+            ) {
+                return@mapNotNull null
+            }
+            val selectedName = block.selectFirst(
+                "[class*=member_name], [class*=user_name], .name_block",
+            )?.text()?.normalizedWhitespace().orEmpty()
+            val rowName = block.children()
+                .firstOrNull { child -> !pointPattern.containsMatchIn(child.text()) && child.text().isNotBlank() }
+                ?.text()
+                ?.normalizedWhitespace()
+                .orEmpty()
+            val name = selectedName.ifBlank { rowName }.ifBlank {
+                text.substring(0, pointMatch.range.first)
+                    .replace(Regex("""^\s*\d+\s*[.)位]?\s*"""), "")
+                    .replace(Regex("""\b(?:leader|member|subleader)\b""", RegexOption.IGNORE_CASE), "")
+                    .trim(' ', ':', '：', '-')
+            }
+            if (name.isBlank() || name.length > 80) return@mapNotNull null
+            val role = Regex(
+                """\b(leader|subleader|member)\b|(?:リーダー|サブリーダー|メンバー)""",
+                RegexOption.IGNORE_CASE,
+            ).find(text)?.value.orEmpty()
+            val link = block.selectFirst("a[href*=idx], a[href*=user], a[href*=member]")?.absUrl("href").orEmpty()
+            val key = Regex("""(?:idx|userId|memberId)=([^&#]+)""", RegexOption.IGNORE_CASE)
+                .find(link)?.groupValues?.get(1)
+                ?.takeIf(String::isNotBlank)
+                ?: normalizeSearch(name)
+            CircleMember(
+                key = key,
+                name = name,
+                points = pointMatch.groupValues[1].parseOptionalInt() ?: 0,
+                role = role,
+                avatarUrl = block.selectFirst("img[src*=Icon], img[class*=icon]").imageUrl(),
+                isCurrentUser = normalizeSearch(name) == normalizeSearch(playerName) ||
+                    block.classNames().any { value -> value.contains("my", ignoreCase = true) },
+            )
+        }
+        .distinctBy(CircleMember::key)
+        .sortedWith(compareByDescending<CircleMember>(CircleMember::points).thenBy(CircleMember::name))
+        .toList()
+}
+
+private fun extractCircleRewards(documents: List<Document>, totalPoints: Int): List<CircleReward> {
+    val pointPattern = Regex("""([\d,]+)\s*PT\b""", RegexOption.IGNORE_CASE)
+    return documents.asSequence()
+        .filter { document ->
+            Regex("""reward|報酬""", RegexOption.IGNORE_CASE).containsMatchIn(document.text())
+        }
+        .flatMap { document ->
+            document.select("[class*=reward], .basic_block, tr").asSequence()
+        }
+        .mapNotNull { block ->
+            val text = block.text().normalizedWhitespace()
+            val pointMatch = pointPattern.find(text) ?: return@mapNotNull null
+            if (Regex(
+                    """circle\s+(?:total|cumulative)|next\s+reward|サークル累計|次の報酬""",
+                    RegexOption.IGNORE_CASE,
+                ).containsMatchIn(text)
+            ) {
+                return@mapNotNull null
+            }
+            val threshold = pointMatch.groupValues[1].parseOptionalInt() ?: return@mapNotNull null
+            val image = block.selectFirst("img:not([src*=line]):not([src*=background])")
+            val imageName = image?.attr("alt")?.normalizedWhitespace().orEmpty()
+            val name = imageName.ifBlank {
+                text.removeRange(pointMatch.range)
+                    .replace(
+                        Regex(
+                            """(?:received|earned|acquired|達成|獲得|×\s*\d+|x\s*\d+)""",
+                            RegexOption.IGNORE_CASE,
+                        ),
+                        "",
+                    )
+                    .trim(' ', ':', '：', '-', '·')
+            }
+            if (name.isBlank() || name.length > 160) return@mapNotNull null
+            CircleReward(
+                pointsRequired = threshold,
+                name = name,
+                imageUrl = image.imageUrl(),
+                earned = threshold <= totalPoints || Regex(
+                    """received|earned|acquired|達成|獲得""",
+                    RegexOption.IGNORE_CASE,
+                ).containsMatchIn(text),
+            )
+        }
+        .distinctBy { reward -> reward.pointsRequired to reward.name }
+        .sortedBy(CircleReward::pointsRequired)
+        .toList()
+}
+
+private fun pointsNear(documents: List<Document>, selector: String): Int? =
+    integerNear(documents, selector, """([\d,]+)\s*PT""")
+
+private fun integerNear(documents: List<Document>, selector: String, pattern: String): Int? {
+    val regex = Regex(pattern, RegexOption.IGNORE_CASE)
+    return documents.asSequence()
+        .flatMap { it.select(selector).asSequence() }
+        .flatMap { element ->
+            sequenceOf(element, element.parent(), element.parent()?.parent()).filterNotNull()
+        }
+        .mapNotNull { element -> regex.find(element.text())?.groupValues?.get(1).parseOptionalInt() }
+        .firstOrNull()
+}
+
+private fun circleMonth(text: String, importedAt: Long): String {
+    val current = YearMonth.from(Instant.ofEpochMilli(importedAt).atZone(ZoneId.systemDefault()))
+    val numericMonth = Regex("""(\d{1,2})月度""").find(text)?.groupValues?.get(1)?.toIntOrNull()
+    val englishMonth = MONTH_NAMES.indexOfFirst { month ->
+        Regex("""\b$month\b""", RegexOption.IGNORE_CASE).containsMatchIn(text)
+    }.takeIf { it >= 0 }?.plus(1)
+    val month = numericMonth ?: englishMonth ?: current.monthValue
+    val datedYear = Regex("""(20\d{2})[/-]\d{1,2}[/-]\d{1,2}""")
+        .find(text)?.groupValues?.get(1)?.toIntOrNull()
+    val year = datedYear ?: if (month > current.monthValue + 6) current.year - 1 else current.year
+    return String.format(Locale.ROOT, "%04d-%02d", year, month)
+}
+
+private val MONTH_NAMES = listOf(
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+
+private fun circlePageTitle(document: Document): String {
+    val imageName = document.selectFirst("img.title")?.attr("src")
+        ?.substringAfterLast('/')
+        ?.substringBefore('.')
+        ?.removePrefix("title_")
+        .orEmpty()
+    if (imageName.isNotBlank()) {
+        return imageName.split('_').joinToString(" ") { word ->
+            word.replaceFirstChar { character -> character.titlecase(Locale.ROOT) }
+        }
+    }
+    return document.title()
+        .replace("maimai DX NET", "", ignoreCase = true)
+        .trim(' ', '-', '－')
+        .ifBlank { "Circle" }
+}
+
+private fun MutableMap<String, String>.putIfUseful(label: String, value: String) {
+    val cleanLabel = label.normalizedWhitespace().trim(' ', ':', '：')
+    val cleanValue = value.normalizedWhitespace().trim()
+    if (cleanLabel.isNotBlank() && cleanValue.isNotBlank() && cleanLabel.length <= 80 && cleanValue.length <= 500) {
+        putIfAbsent(cleanLabel, cleanValue)
+    }
+}
+
+private fun String.stripLabels(vararg labels: String): String {
+    var value = normalizedWhitespace()
+    labels.forEach { label ->
+        value = value.replace(Regex("""^${Regex.escape(label)}\s*[:：]?\s*""", RegexOption.IGNORE_CASE), "")
+    }
+    return value.trim()
+}
+
+private fun String.normalizedWhitespace(): String = replace(Regex("""\s+"""), " ").trim()
+
+private fun String?.parseOptionalInt(): Int? = this
+    ?.replace(Regex("""[^0-9-]"""), "")
+    ?.toIntOrNull()
+
 internal fun extractPlayerProfile(
     document: Document,
     region: AccountRegion,
@@ -254,6 +682,21 @@ internal fun extractPlayerProfile(
     val starText = block.selectFirst(".p_l_10.f_l.f_14")?.text().orEmpty()
     val avatar = block.selectFirst("img.w_112.f_l")
         ?: block.selectFirst("""img[src*="/img/Icon/"]""")
+    val pageText = document.text().normalizedWhitespace()
+    val currentVersionPlayCount = playCountAfterLabels(
+        pageText,
+        "play count of current version",
+        "current version play count",
+        "今バージョンのプレイ回数",
+        "今バージョンプレイ回数",
+    )
+    val totalPlayCount = playCountAfterLabels(
+        pageText,
+        "maimaiDX total play count",
+        "total maimaiDX play count",
+        "maimaiでらっくす総プレイ回数",
+        "maimaiDX総プレイ回数",
+    )
 
     return PlayerProfile(
         name = name.ifBlank { "Player" },
@@ -265,9 +708,19 @@ internal fun extractPlayerProfile(
         avatarUrl = avatar.imageUrl(),
         courseRankUrl = courseRank.imageUrl(),
         classRankUrl = classRank.imageUrl(),
+        currentVersionPlayCount = currentVersionPlayCount,
+        totalPlayCount = totalPlayCount,
         importedAt = importedAt,
     )
 }
+
+private fun playCountAfterLabels(text: String, vararg labels: String): Int? =
+    labels.firstNotNullOfOrNull { label ->
+        Regex(
+            """${Regex.escape(label)}\s*[:：]?\s*([\d,]+)""",
+            RegexOption.IGNORE_CASE,
+        ).find(text)?.groupValues?.get(1).parseOptionalInt()
+    }
 
 private fun Element?.imageUrl(): String = this?.absUrl("src")
     ?.ifBlank { attr("src") }

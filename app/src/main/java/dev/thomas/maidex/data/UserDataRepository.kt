@@ -4,8 +4,12 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 class UserDataRepository(context: Context) {
     private val helper = UserDatabase(context)
@@ -68,9 +72,63 @@ class UserDataRepository(context: Context) {
             ratingBaseUrl = preferences.getString("rating_base_url", "").orEmpty(),
             starIconUrl = preferences.getString("star_icon_url", "").orEmpty(),
             classRankUrl = preferences.getString("class_rank_url", "").orEmpty(),
+            currentVersionPlayCount = preferences.getInt("current_version_play_count", -1).takeIf { it >= 0 },
+            totalPlayCount = preferences.getInt("total_play_count", -1).takeIf { it >= 0 },
             importedAt = preferences.getLong("imported_at", 0L),
         ))
     }
+
+    fun loadCircleHistory(): List<CircleData> = helper.readableDatabase.rawQuery(
+        "SELECT data_json FROM circle_months ORDER BY month DESC, captured_at DESC",
+        null,
+    ).use { cursor ->
+        buildList(cursor.count) {
+            while (cursor.moveToNext()) add(decodeCircle(cursor.getString(0)))
+        }
+    }
+
+    fun loadCircleSnapshots(): List<CircleDailySnapshot> = helper.readableDatabase.rawQuery(
+        "SELECT day, captured_at, data_json FROM circle_snapshots ORDER BY day ASC",
+        null,
+    ).use { cursor ->
+        buildList(cursor.count) {
+            while (cursor.moveToNext()) {
+                add(
+                    CircleDailySnapshot(
+                        day = cursor.getString(0),
+                        capturedAt = cursor.getLong(1),
+                        circle = decodeCircle(cursor.getString(2)),
+                    ),
+                )
+            }
+        }
+    }
+
+    fun loadPlayCountSnapshots(): List<PlayCountSnapshot> = helper.readableDatabase.rawQuery(
+        """SELECT day, captured_at, current_version_count, total_count
+            FROM play_count_snapshots ORDER BY day ASC""",
+        null,
+    ).use { cursor ->
+        buildList(cursor.count) {
+            while (cursor.moveToNext()) {
+                add(
+                    PlayCountSnapshot(
+                        day = cursor.getString(0),
+                        capturedAt = cursor.getLong(1),
+                        currentVersionPlayCount = cursor.getInt(2),
+                        totalPlayCount = cursor.getInt(3),
+                    ),
+                )
+            }
+        }
+    }
+
+    fun loadTrackingSettings(): TrackingSettings = TrackingSettings(
+        syncHour = preferences.getInt("tracking_hour", 7).coerceIn(0, 23),
+        lastAttemptAt = preferences.getLong("tracking_last_attempt_at", 0L),
+        lastSuccessAt = preferences.getLong("tracking_last_success_at", 0L),
+        lastError = preferences.getString("tracking_last_error", "").orEmpty(),
+    )
 
     fun saveImport(result: ImportResult): PlayerProfile {
         val profile = profileAssetCache.cache(result.profile)
@@ -108,7 +166,41 @@ class UserDataRepository(context: Context) {
                     SQLiteDatabase.CONFLICT_REPLACE,
                 )
             }
+            saveTrackingRows(profile, result.circle)
         }
+        saveProfile(profile)
+        return profile
+    }
+
+    fun saveTrackingSnapshot(profile: PlayerProfile, circle: CircleData?): PlayerProfile {
+        val cachedProfile = profileAssetCache.cache(profile)
+        helper.writableDatabase.transaction {
+            saveTrackingRows(cachedProfile, circle)
+        }
+        saveProfile(cachedProfile)
+        return cachedProfile
+    }
+
+    fun setTrackingHour(hour: Int) {
+        preferences.edit().putInt("tracking_hour", hour.coerceIn(0, 23)).apply()
+    }
+
+    fun recordTrackingAttempt(at: Long = System.currentTimeMillis()) {
+        preferences.edit().putLong("tracking_last_attempt_at", at).apply()
+    }
+
+    fun recordTrackingSuccess(at: Long = System.currentTimeMillis()) {
+        preferences.edit()
+            .putLong("tracking_last_success_at", at)
+            .putString("tracking_last_error", "")
+            .apply()
+    }
+
+    fun recordTrackingFailure(message: String) {
+        preferences.edit().putString("tracking_last_error", message).apply()
+    }
+
+    private fun saveProfile(profile: PlayerProfile) {
         val editor = preferences.edit()
             .putString("name", profile.name)
             .putInt("rating", profile.officialRating)
@@ -124,21 +216,27 @@ class UserDataRepository(context: Context) {
             .putLong("imported_at", profile.importedAt)
         profile.starCount?.let { editor.putInt("star_count", it) }
             ?: editor.remove("star_count")
+        profile.currentVersionPlayCount?.let { editor.putInt("current_version_play_count", it) }
+            ?: editor.remove("current_version_play_count")
+        profile.totalPlayCount?.let { editor.putInt("total_play_count", it) }
+            ?: editor.remove("total_play_count")
         editor.apply()
-        return profile
     }
 
     fun clear() {
         helper.writableDatabase.transaction {
             delete("scores", null, null)
             delete("play_details", null, null)
+            delete("circle_months", null, null)
+            delete("circle_snapshots", null, null)
+            delete("play_count_snapshots", null, null)
         }
         preferences.edit().clear().apply()
         profileAssetCache.clear()
     }
 }
 
-private class UserDatabase(context: Context) : SQLiteOpenHelper(context, "user-data.db", null, 1) {
+private class UserDatabase(context: Context) : SQLiteOpenHelper(context, "user-data.db", null, 2) {
     override fun onCreate(database: SQLiteDatabase) {
         database.execSQL(
             """CREATE TABLE scores(
@@ -162,9 +260,41 @@ private class UserDatabase(context: Context) : SQLiteOpenHelper(context, "user-d
                 judgments TEXT NOT NULL
             )""",
         )
+        createTrackingTables(database)
     }
 
-    override fun onUpgrade(database: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(database: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) createTrackingTables(database)
+    }
+}
+
+private fun createTrackingTables(database: SQLiteDatabase) {
+    database.execSQL(
+        """CREATE TABLE circle_months(
+            month TEXT NOT NULL,
+            circle_key TEXT NOT NULL,
+            captured_at INTEGER NOT NULL,
+            data_json TEXT NOT NULL,
+            PRIMARY KEY(month, circle_key)
+        )""",
+    )
+    database.execSQL(
+        """CREATE TABLE circle_snapshots(
+            day TEXT NOT NULL,
+            circle_key TEXT NOT NULL,
+            captured_at INTEGER NOT NULL,
+            data_json TEXT NOT NULL,
+            PRIMARY KEY(day, circle_key)
+        )""",
+    )
+    database.execSQL(
+        """CREATE TABLE play_count_snapshots(
+            day TEXT PRIMARY KEY,
+            captured_at INTEGER NOT NULL,
+            current_version_count INTEGER NOT NULL,
+            total_count INTEGER NOT NULL
+        )""",
+    )
 }
 
 private inline fun SQLiteDatabase.transaction(block: SQLiteDatabase.() -> Unit) {
@@ -176,6 +306,176 @@ private inline fun SQLiteDatabase.transaction(block: SQLiteDatabase.() -> Unit) 
         endTransaction()
     }
 }
+
+private fun SQLiteDatabase.saveTrackingRows(profile: PlayerProfile, circle: CircleData?) {
+    circle?.let { value ->
+        val json = encodeCircle(value)
+        insertWithOnConflict(
+            "circle_months",
+            null,
+            ContentValues().apply {
+                put("month", value.month)
+                put("circle_key", value.key)
+                put("captured_at", value.importedAt)
+                put("data_json", json)
+            },
+            SQLiteDatabase.CONFLICT_REPLACE,
+        )
+        insertWithOnConflict(
+            "circle_snapshots",
+            null,
+            ContentValues().apply {
+                put("day", dayOf(value.importedAt))
+                put("circle_key", value.key)
+                put("captured_at", value.importedAt)
+                put("data_json", json)
+            },
+            SQLiteDatabase.CONFLICT_REPLACE,
+        )
+    }
+    val currentVersionCount = profile.currentVersionPlayCount
+    val totalCount = profile.totalPlayCount
+    if (currentVersionCount != null && totalCount != null) {
+        insertWithOnConflict(
+            "play_count_snapshots",
+            null,
+            ContentValues().apply {
+                put("day", dayOf(profile.importedAt))
+                put("captured_at", profile.importedAt)
+                put("current_version_count", currentVersionCount)
+                put("total_count", totalCount)
+            },
+            SQLiteDatabase.CONFLICT_REPLACE,
+        )
+    }
+}
+
+private fun dayOf(timestamp: Long): String = LocalDate.ofInstant(
+    Instant.ofEpochMilli(timestamp),
+    ZoneId.systemDefault(),
+).toString()
+
+private fun encodeCircle(circle: CircleData): String = JSONObject().apply {
+    put("month", circle.month)
+    put("name", circle.name)
+    put("code", circle.code)
+    put("leader", circle.leader)
+    put("comment", circle.comment)
+    put("tags", JSONArray(circle.tags))
+    put("circleClass", circle.circleClass)
+    put("totalPoints", circle.totalPoints)
+    put("regionalRank", circle.regionalRank ?: JSONObject.NULL)
+    put("rankingLabel", circle.rankingLabel)
+    put("memberCount", circle.memberCount ?: JSONObject.NULL)
+    put("daysUntilReset", circle.daysUntilReset ?: JSONObject.NULL)
+    put("nextRewardPoints", circle.nextRewardPoints ?: JSONObject.NULL)
+    put("updatedAt", circle.updatedAt)
+    put("characterUrl", circle.characterUrl)
+    put("backgroundUrl", circle.backgroundUrl)
+    put("members", JSONArray().apply {
+        circle.members.forEach { member ->
+            put(JSONObject().apply {
+                put("key", member.key)
+                put("name", member.name)
+                put("points", member.points)
+                put("role", member.role)
+                put("avatarUrl", member.avatarUrl)
+                put("isCurrentUser", member.isCurrentUser)
+            })
+        }
+    })
+    put("rewards", JSONArray().apply {
+        circle.rewards.forEach { reward ->
+            put(JSONObject().apply {
+                put("pointsRequired", reward.pointsRequired)
+                put("name", reward.name)
+                put("imageUrl", reward.imageUrl)
+                put("earned", reward.earned)
+            })
+        }
+    })
+    put("information", JSONArray().apply {
+        circle.information.forEach { item ->
+            put(JSONObject().apply {
+                put("label", item.label)
+                put("value", item.value)
+            })
+        }
+    })
+    put("pages", JSONArray().apply {
+        circle.pages.forEach { page ->
+            put(JSONObject().apply {
+                put("title", page.title)
+                put("text", page.text)
+            })
+        }
+    })
+    put("importedAt", circle.importedAt)
+}.toString()
+
+private fun decodeCircle(value: String): CircleData {
+    val root = JSONObject(value)
+    return CircleData(
+        month = root.optString("month"),
+        name = root.optString("name"),
+        code = root.optString("code"),
+        leader = root.optString("leader"),
+        comment = root.optString("comment"),
+        tags = root.optJSONArray("tags").strings(),
+        circleClass = root.optString("circleClass"),
+        totalPoints = root.optInt("totalPoints"),
+        regionalRank = root.optionalInt("regionalRank"),
+        rankingLabel = root.optString("rankingLabel"),
+        memberCount = root.optionalInt("memberCount"),
+        daysUntilReset = root.optionalInt("daysUntilReset"),
+        nextRewardPoints = root.optionalInt("nextRewardPoints"),
+        updatedAt = root.optString("updatedAt"),
+        characterUrl = root.optString("characterUrl"),
+        backgroundUrl = root.optString("backgroundUrl"),
+        members = root.optJSONArray("members").objects().map { member ->
+            CircleMember(
+                key = member.optString("key"),
+                name = member.optString("name"),
+                points = member.optInt("points"),
+                role = member.optString("role"),
+                avatarUrl = member.optString("avatarUrl"),
+                isCurrentUser = member.optBoolean("isCurrentUser"),
+            )
+        },
+        rewards = root.optJSONArray("rewards").objects().map { reward ->
+            CircleReward(
+                pointsRequired = reward.optInt("pointsRequired"),
+                name = reward.optString("name"),
+                imageUrl = reward.optString("imageUrl"),
+                earned = reward.optBoolean("earned"),
+            )
+        },
+        information = root.optJSONArray("information").objects().map { item ->
+            CircleInfoItem(
+                label = item.optString("label"),
+                value = item.optString("value"),
+            )
+        },
+        pages = root.optJSONArray("pages").objects().map { page ->
+            CirclePageInfo(
+                title = page.optString("title"),
+                text = page.optString("text"),
+            )
+        },
+        importedAt = root.optLong("importedAt"),
+    )
+}
+
+private fun JSONObject.optionalInt(key: String): Int? =
+    if (has(key) && !isNull(key)) optInt(key) else null
+
+private fun JSONArray?.strings(): List<String> =
+    if (this == null) emptyList() else (0 until length()).mapNotNull { index ->
+        optString(index).takeIf(String::isNotBlank)
+    }
+
+private fun JSONArray?.objects(): List<JSONObject> =
+    if (this == null) emptyList() else (0 until length()).mapNotNull(::optJSONObject)
 
 private inline fun <reified T : Enum<T>> enumValueOr(value: String, fallback: T): T =
     runCatching { enumValueOf<T>(value) }.getOrDefault(fallback)

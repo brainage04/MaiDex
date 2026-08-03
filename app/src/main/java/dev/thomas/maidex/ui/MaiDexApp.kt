@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MilitaryTech
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Search
@@ -78,6 +79,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -121,6 +123,8 @@ import dev.thomas.maidex.data.ChartFilters
 import dev.thomas.maidex.data.ChartSort
 import dev.thomas.maidex.data.ComboMedal
 import dev.thomas.maidex.data.FilterOptions
+import dev.thomas.maidex.data.CircleDailySnapshot
+import dev.thomas.maidex.data.CircleData
 import dev.thomas.maidex.data.MedalLevelTable
 import dev.thomas.maidex.data.SongChart
 import dev.thomas.maidex.data.SongUnlockInfo
@@ -131,15 +135,20 @@ import dev.thomas.maidex.data.ConstantAvailability
 import dev.thomas.maidex.data.Grade
 import dev.thomas.maidex.data.JudgeCounts
 import dev.thomas.maidex.data.PlayDetail
+import dev.thomas.maidex.data.PlayCountSnapshot
 import dev.thomas.maidex.data.PlayerProfile
 import dev.thomas.maidex.data.ScoreAnalytics
 import dev.thomas.maidex.data.ScoreAnalyticsSummary
 import java.util.Locale
 import dev.thomas.maidex.data.SortOrder
 import dev.thomas.maidex.data.SyncMedal
+import dev.thomas.maidex.data.TrackingSettings
 import dev.thomas.maidex.data.UserScore
 import dev.thomas.maidex.rating.AchievementLossCalculator
 import dev.thomas.maidex.rating.RatingCalculator
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -153,6 +162,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
     var showUnlockGuide by remember { mutableStateOf(false) }
     var showDanGuide by remember { mutableStateOf(false) }
     var showScoreStats by remember { mutableStateOf(false) }
+    var showCircle by remember { mutableStateOf(false) }
     var selectedUnlockGuideEntryId by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
@@ -251,7 +261,6 @@ fun MaiDexApp(viewModel: MainViewModel) {
                 onSearch = viewModel::setSearch,
                 onSort = viewModel::setSort,
                 onToggleSortOrder = viewModel::toggleSortOrder,
-                onToggleUtage = viewModel::toggleUtageVisibility,
                 onClearFilters = viewModel::clearFilters,
                 onChart = { selectedChart = it },
                 onUnlockGuide = { entryId ->
@@ -293,6 +302,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
             profile = state.profile,
             importStatus = state.importStatus,
             hasScores = state.scores.isNotEmpty(),
+            playCountSnapshots = state.playCountSnapshots,
             onImport = viewModel::importAccount,
             onClear = viewModel::clearAccount,
             onDismissStatus = viewModel::dismissImportStatus,
@@ -300,7 +310,20 @@ fun MaiDexApp(viewModel: MainViewModel) {
                 showAccount = false
                 showScoreStats = true
             },
+            onCircle = {
+                showAccount = false
+                showCircle = true
+            },
             onDismiss = { showAccount = false },
+        )
+    }
+    if (showCircle) {
+        CircleDialog(
+            history = state.circleHistory,
+            snapshots = state.circleSnapshots,
+            trackingSettings = state.trackingSettings,
+            onTrackingHour = viewModel::setTrackingHour,
+            onDismiss = { showCircle = false },
         )
     }
     if (showScoreStats) {
@@ -398,12 +421,18 @@ private fun InfoDialog(
                 InfoSection(
                     title = "DX NET and privacy",
                     body = "Sign-in happens on the official DX NET site. Imported scores, recent-play " +
-                        "details, cookies, and cached profile artwork stay in app-private storage on this " +
-                        "device. MaiDex does not store your SEGA ID password.",
+                        "details, circle history, play-count snapshots, cookies, and cached artwork stay " +
+                        "in app-private storage on this device. MaiDex does not store your SEGA ID password.",
+                )
+                InfoSection(
+                    title = "Daily tracking",
+                    body = "MaiDex checks DX NET near the selected local hour while the saved session remains " +
+                        "valid. Android may delay the check for battery or network reasons. Circle history " +
+                        "starts with the first successful sync; DX NET cannot backfill unavailable months.",
                 )
                 InfoSection(
                     title = "Images and matching",
-                    body = "Cover art is cached after viewing, and profile artwork is cached after Refresh. " +
+                    body = "Cover art is cached after viewing, and profile/circle artwork is cached after Refresh. " +
                         "DX NET scores are matched by song, chart type, difficulty, and level. A newly added " +
                         "or renamed chart may remain unmatched until the offline catalog is updated.",
                 )
@@ -465,7 +494,6 @@ private fun CatalogContent(
     onSearch: (String) -> Unit,
     onSort: (ChartSort) -> Unit,
     onToggleSortOrder: () -> Unit,
-    onToggleUtage: () -> Unit,
     onClearFilters: () -> Unit,
     onChart: (SongChart) -> Unit,
     onUnlockGuide: (String) -> Unit,
@@ -515,14 +543,6 @@ private fun CatalogContent(
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )
-                },
-            )
-            FilterChip(
-                selected = state.filters.showUtage,
-                onClick = onToggleUtage,
-                modifier = Modifier.fillMaxWidth(),
-                label = {
-                    Text(if (state.filters.showUtage) "UTAGE: shown" else "UTAGE: hidden")
                 },
             )
             if (state.filters.activeCount > 0) {
@@ -1518,6 +1538,25 @@ private fun FilterDialog(
                             label = { typeLabel(it) },
                         ) { draft = draft.copy(types = it) }
                     }
+                    item(key = "show-utage") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Show UTAGE charts")
+                                Text(
+                                    "Hide banquet charts from catalog results.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = draft.showUtage,
+                                onCheckedChange = { draft = draft.copy(showUtage = it) },
+                            )
+                        }
+                    }
                     item(key = "region") {
                         MultiSelectSection(
                             "Region",
@@ -1618,14 +1657,17 @@ private fun AccountDialog(
     profile: PlayerProfile?,
     hasScores: Boolean,
     importStatus: ImportStatus,
+    playCountSnapshots: List<PlayCountSnapshot>,
     onImport: (AccountRegion) -> Unit,
     onClear: () -> Unit,
     onDismissStatus: () -> Unit,
     onScoreStats: () -> Unit,
+    onCircle: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var region by remember(profile) { mutableStateOf(profile?.region ?: AccountRegion.INTERNATIONAL) }
     var showProfileCloseUp by remember(profile) { mutableStateOf(false) }
+    var showPlayCountHistory by remember(profile) { mutableStateOf(false) }
     val context = LocalContext.current
     val isImporting = importStatus is ImportStatus.Running
 
@@ -1637,7 +1679,7 @@ private fun AccountDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.88f),
+            modifier = Modifier.fillMaxWidth(0.94f),
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
         ) {
@@ -1649,19 +1691,15 @@ private fun AccountDialog(
                     Column(Modifier.weight(1f)) {
                         Text(
                             "maimai DX NET",
-                            style = MaterialTheme.typography.headlineSmall,
+                            style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Black,
+                            maxLines = 1,
                         )
                         Text(
-                            "Official account data, stored only on this device",
+                            "Official account data · device only",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    }
-                    if (profile != null && hasScores) {
-                        IconButton(onClick = onScoreStats) {
-                            Icon(Icons.Default.BarChart, contentDescription = "Score stats")
-                        }
                     }
                     TextButton(onClick = {
                         onDismissStatus()
@@ -1670,7 +1708,9 @@ private fun AccountDialog(
                 }
 
                 Row(
-                    modifier = Modifier.padding(top = 6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     AccountRegion.entries.forEach { option ->
@@ -1681,6 +1721,17 @@ private fun AccountDialog(
                             label = { Text(option.label) },
                         )
                     }
+                    Spacer(Modifier.weight(1f))
+                    if (profile != null) {
+                        IconButton(onClick = onCircle) {
+                            Icon(Icons.Default.Groups, contentDescription = "Circle")
+                        }
+                    }
+                    if (profile != null && hasScores) {
+                        IconButton(onClick = onScoreStats) {
+                            Icon(Icons.Default.BarChart, contentDescription = "Score stats")
+                        }
+                    }
                 }
 
                 if (profile != null) {
@@ -1690,6 +1741,23 @@ private fun AccountDialog(
                             .padding(top = 6.dp, bottom = 8.dp)
                             .clickable { showProfileCloseUp = true },
                     )
+                    if (playCountSnapshots.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "${playCountSnapshots.size} daily play-count snapshot" +
+                                    if (playCountSnapshots.size == 1) "" else "s",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TextButton(onClick = { showPlayCountHistory = true }) {
+                                Text("View history")
+                            }
+                        }
+                    }
                 } else {
                     Surface(
                         modifier = Modifier
@@ -1824,16 +1892,655 @@ private fun AccountDialog(
             onDismiss = { showProfileCloseUp = false },
         )
     }
+    if (showPlayCountHistory) {
+        PlayCountHistoryDialog(
+            snapshots = playCountSnapshots,
+            onDismiss = { showPlayCountHistory = false },
+        )
+    }
 }
 
 @Composable
-private fun ScoreStatsDialog(
+private fun CircleDialog(
+    history: List<CircleData>,
+    snapshots: List<CircleDailySnapshot>,
+    trackingSettings: TrackingSettings,
+    onTrackingHour: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val current = history.firstOrNull()
+    val otherMembers = remember(snapshots) {
+        snapshots.asSequence()
+            .flatMap { it.circle.members.asSequence() }
+            .filterNot { it.isCurrentUser }
+            .distinctBy { it.key }
+            .sortedByDescending { member ->
+                snapshots.lastOrNull()?.circle?.members
+                    ?.firstOrNull { it.key == member.key }
+                    ?.points ?: member.points
+            }
+            .toList()
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.96f)
+                .fillMaxHeight(0.94f),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            current?.name ?: "Circle",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Black,
+                        )
+                        Text(
+                            if (current == null) {
+                                "Refresh DX NET to import circle data"
+                            } else {
+                                "${current.month} · stored only on this device"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = onDismiss) { Text("Close") }
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 10.dp,
+                        end = 10.dp,
+                        bottom = 18.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    item(key = "tracking") {
+                        CircleTrackingCard(trackingSettings, onTrackingHour)
+                    }
+                    if (current == null) {
+                        item(key = "empty") {
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                ),
+                            ) {
+                                Text(
+                                    "No circle information has been captured yet. Sign in to DX NET and " +
+                                        "tap Refresh in the account section. Monthly history starts with " +
+                                        "the first successful circle sync.",
+                                    modifier = Modifier.padding(14.dp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    } else {
+                        item(key = "overview") {
+                            CircleOverviewCard(current)
+                        }
+                        if (snapshots.isNotEmpty()) {
+                            item(key = "history-heading") {
+                                CircleSectionHeading(
+                                    "Daily point tracking",
+                                    "${snapshots.size} daily snapshot" +
+                                        if (snapshots.size == 1) "" else "s",
+                                )
+                            }
+                            item(key = "circle-trend") {
+                                PointTrendCard(
+                                    title = "Circle total",
+                                    points = snapshots.map { it.day to it.circle.totalPoints },
+                                )
+                            }
+                            val currentUserPoints = snapshots.mapNotNull { snapshot ->
+                                snapshot.circle.members
+                                    .firstOrNull { it.isCurrentUser }
+                                    ?.let { snapshot.day to it.points }
+                            }
+                            if (currentUserPoints.isNotEmpty()) {
+                                item(key = "current-user-trend") {
+                                    PointTrendCard(
+                                        title = snapshots.last().circle.members
+                                            .firstOrNull { it.isCurrentUser }
+                                            ?.name
+                                            ?.let { "$it (you)" }
+                                            ?: "Your contribution",
+                                        points = currentUserPoints,
+                                    )
+                                }
+                            }
+                            items(otherMembers, key = { member -> "trend-${member.key}" }) { member ->
+                                val memberPoints = snapshots.mapNotNull { snapshot ->
+                                    snapshot.circle.members
+                                        .firstOrNull { it.key == member.key }
+                                        ?.let { snapshot.day to it.points }
+                                }
+                                PointTrendCard(member.name, memberPoints)
+                            }
+                        } else {
+                            item(key = "tracking-empty") {
+                                Text(
+                                    "Point trends will appear after the first successful daily sync.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        item(key = "months-heading") {
+                            CircleSectionHeading(
+                                "Monthly history",
+                                "History starts when MaiDex first syncs each month",
+                            )
+                        }
+                        items(history, key = { circle -> "month-${circle.month}-${circle.key}" }) { circle ->
+                            CircleMonthCard(circle, initiallyExpanded = circle === current)
+                        }
+                        if (current.information.isNotEmpty() || current.pages.isNotEmpty()) {
+                            item(key = "details-heading") {
+                                CircleSectionHeading(
+                                    "DX NET page details",
+                                    "Imported labels and page text preserve information not covered above",
+                                )
+                            }
+                            if (current.information.isNotEmpty()) {
+                                item(key = "details") {
+                                    Card(
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                        ),
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            current.information.forEach { item ->
+                                                CircleInfoRow(item.label, item.value)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            items(
+                                current.pages,
+                                key = { page -> "page-${page.title}-${page.text.hashCode()}" },
+                            ) { page ->
+                                CirclePageCard(page.title, page.text)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CircleTrackingCard(
+    settings: TrackingSettings,
+    onTrackingHour: (Int) -> Unit,
+) {
+    var hourMenuExpanded by remember { mutableStateOf(false) }
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+        ),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Daily DX NET sync", fontWeight = FontWeight.Bold)
+                    Text(
+                        "Circle/member points and both play counts",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Box {
+                    OutlinedButton(onClick = { hourMenuExpanded = true }) {
+                        Text(String.format(Locale.US, "%02d:00", settings.syncHour))
+                    }
+                    DropdownMenu(
+                        expanded = hourMenuExpanded,
+                        onDismissRequest = { hourMenuExpanded = false },
+                    ) {
+                        (0..23).forEach { hour ->
+                            DropdownMenuItem(
+                                text = { Text(String.format(Locale.US, "%02d:00", hour)) },
+                                onClick = {
+                                    onTrackingHour(hour)
+                                    hourMenuExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            val status = when {
+                settings.lastError.isNotBlank() ->
+                    "Last check failed: ${settings.lastError}"
+                settings.lastSuccessAt > 0L ->
+                    "Last synced ${formatTrackedTime(settings.lastSuccessAt)}"
+                else -> "Waiting for the first scheduled check"
+            }
+            Text(
+                status,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (settings.lastError.isBlank()) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+            )
+            Text(
+                "The saved DX NET session must still be valid. Android may delay background work " +
+                    "because of battery or network restrictions.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CircleOverviewCard(circle: CircleData) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Text("Current month", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            if (circle.backgroundUrl.isNotBlank() || circle.characterUrl.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(116.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                ) {
+                    circle.backgroundUrl.takeIf(String::isNotBlank)?.let { url ->
+                        AsyncImage(
+                            model = url,
+                            contentDescription = "Circle background",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                    circle.characterUrl.takeIf(String::isNotBlank)?.let { url ->
+                        AsyncImage(
+                            model = url,
+                            contentDescription = "Circle character",
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .align(Alignment.CenterEnd)
+                                .padding(4.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                InfoMetric(
+                    value = formatCount(circle.totalPoints),
+                    label = "Circle points",
+                    modifier = Modifier.weight(1f),
+                )
+                InfoMetric(
+                    value = circle.regionalRank?.let { "#${formatCount(it)}" } ?: "—",
+                    label = circle.rankingLabel.ifBlank { "Regional rank" },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            circle.code.takeIf(String::isNotBlank)?.let { CircleInfoRow("Circle code", it) }
+            circle.leader.takeIf(String::isNotBlank)?.let { CircleInfoRow("Leader", it) }
+            circle.circleClass.takeIf(String::isNotBlank)?.let { CircleInfoRow("Circle class", it) }
+            circle.memberCount?.let { CircleInfoRow("Members", it.toString()) }
+            circle.daysUntilReset?.let { CircleInfoRow("Days until reset", it.toString()) }
+            circle.nextRewardPoints?.let { CircleInfoRow("Points until next reward", formatCount(it)) }
+            circle.updatedAt.takeIf(String::isNotBlank)?.let { CircleInfoRow("DX NET updated", it) }
+            circle.comment.takeIf(String::isNotBlank)?.let { CircleInfoRow("Comment", it) }
+            if (circle.tags.isNotEmpty()) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    circle.tags.forEach { tag ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = RoundedCornerShape(50),
+                        ) {
+                            Text(
+                                tag,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
+                }
+            }
+            if (circle.rewards.isNotEmpty()) {
+                Text("Point rewards", fontWeight = FontWeight.Bold)
+                circle.rewards.sortedBy { it.pointsRequired }.forEach { reward ->
+                    CircleInfoRow(
+                        "${formatCount(reward.pointsRequired)} PT",
+                        (if (reward.earned) "Received · " else "") + reward.name,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CircleMonthCard(circle: CircleData, initiallyExpanded: Boolean) {
+    var expanded by remember(circle.month, circle.key) { mutableStateOf(initiallyExpanded) }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(circle.month, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "${formatCount(circle.totalPoints)} PT" +
+                            (circle.regionalRank?.let { " · regional rank #${formatCount(it)}" } ?: ""),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    if (expanded) "Collapse" else "Expand",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            if (expanded) {
+                Column(
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Rewards", fontWeight = FontWeight.Bold)
+                    val earnedRewards = circle.rewards.filter { it.earned }
+                    if (earnedRewards.isEmpty()) {
+                        Text(
+                            "No received reward details were available in this sync.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        earnedRewards.forEach { reward ->
+                            CircleInfoRow("${formatCount(reward.pointsRequired)} PT", reward.name)
+                        }
+                    }
+                    Text("Member contributions", fontWeight = FontWeight.Bold)
+                    if (circle.members.isEmpty()) {
+                        Text(
+                            "DX NET did not expose member point details on the imported pages.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        circle.members.sortedByDescending { it.points }.forEachIndexed { index, member ->
+                            CircleInfoRow(
+                                "${index + 1}. ${member.name}${if (member.isCurrentUser) " (you)" else ""}",
+                                "${formatCount(member.points)} PT",
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CirclePageCard(title: String, text: String) {
+    var expanded by remember(title, text) { mutableStateOf(false) }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(title, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                Text(
+                    if (expanded) "Collapse" else "Show page text",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (expanded) {
+                Text(
+                    text,
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CircleSectionHeading(title: String, subtitle: String) {
+    Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun CircleInfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            value,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.End,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun PointTrendCard(title: String, points: List<Pair<String, Int>>) {
+    if (points.isEmpty()) return
+    val values = points.map { it.second }
+    val first = values.first()
+    val latest = values.last()
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                Text(
+                    formatCount(latest),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                if (latest != first) {
+                    Text(
+                        "  ${if (latest > first) "+" else ""}${formatCount(latest - first)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+                    .padding(top = 8.dp),
+            ) {
+                val minimum = values.minOrNull()?.toFloat() ?: 0f
+                val maximum = values.maxOrNull()?.toFloat() ?: minimum
+                val range = (maximum - minimum).takeIf { it > 0f } ?: 1f
+                val step = if (values.size > 1) size.width / values.lastIndex else 0f
+                fun point(index: Int): androidx.compose.ui.geometry.Offset {
+                    val x = if (values.size == 1) size.width / 2f else index * step
+                    val y = size.height - ((values[index] - minimum) / range * size.height)
+                    return androidx.compose.ui.geometry.Offset(x, y)
+                }
+                values.indices.drop(1).forEach { index ->
+                    drawLine(
+                        color = Color(0xFF087BA8),
+                        start = point(index - 1),
+                        end = point(index),
+                        strokeWidth = 2.dp.toPx(),
+                        cap = StrokeCap.Round,
+                    )
+                }
+                values.indices.forEach { index ->
+                    drawCircle(
+                        color = Color(0xFF087BA8),
+                        radius = 2.5.dp.toPx(),
+                        center = point(index),
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth()) {
+                Text(
+                    points.first().first,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    points.last().first,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayCountHistoryDialog(
+    snapshots: List<PlayCountSnapshot>,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.92f),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Play-count history",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Black,
+                        )
+                        Text(
+                            "${snapshots.size} daily snapshot" + if (snapshots.size == 1) "" else "s",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = onDismiss) { Text("Close") }
+                }
+                if (snapshots.isEmpty()) {
+                    Text("No play-count snapshots have been captured yet.")
+                } else {
+                    PointTrendCard(
+                        title = "Current version play count",
+                        points = snapshots.map { it.day to it.currentVersionPlayCount },
+                    )
+                    PointTrendCard(
+                        title = "maimaiDX total play count",
+                        points = snapshots.map { it.day to it.totalPlayCount },
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatCount(value: Int): String = String.format(Locale.US, "%,d", value)
+
+private fun formatTrackedTime(timestamp: Long): String = DateTimeFormatter
+    .ofPattern("yyyy-MM-dd HH:mm", Locale.US)
+    .withZone(ZoneId.systemDefault())
+    .format(Instant.ofEpochMilli(timestamp))
+
+internal class MedalTableExpansionState {
+    private val values = mutableStateMapOf<String, Boolean>()
+
+    operator fun get(title: String): Boolean = values[title] ?: true
+
+    operator fun set(title: String, expanded: Boolean) {
+        values[title] = expanded
+    }
+}
+
+@Composable
+internal fun ScoreStatsDialog(
     charts: List<SongChart>,
     scores: Map<String, UserScore>,
     onDismiss: () -> Unit,
     onChart: (SongChart) -> Unit,
 ) {
     val summary = remember(charts, scores) { ScoreAnalytics.summarize(charts, scores) }
+    val expandedTables = remember { MedalTableExpansionState() }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -1880,15 +2587,28 @@ private fun ScoreStatsDialog(
                     item(key = "bests") {
                         BestScoresCard(summary, onChart)
                     }
-                    item(key = "high-levels") {
-                        MedalTableCard(summary.highLevels)
+                    item(key = "count-guidance") {
+                        Text(
+                            "Counts are exact; higher medals are not counted again in lower rows.",
+                            modifier = Modifier.padding(horizontal = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    item(key = "lower-levels") {
-                        MedalTableCard(summary.lowerLevels)
+                    summary.levelTables.forEachIndexed { index, table ->
+                        item(key = "standard-levels-$index") {
+                            MedalTableCard(
+                                table = table,
+                                expanded = expandedTables[table.title],
+                                onExpandedChange = { expandedTables[table.title] = it },
+                            )
+                        }
                     }
                     item(key = "utage-levels") {
                         MedalTableCard(
                             table = summary.utage,
+                            expanded = expandedTables[summary.utage.title],
+                            onExpandedChange = { expandedTables[summary.utage.title] = it },
                             note = "UTAGE uses estimated levels from the catalog; * means unrated.",
                         )
                     }
@@ -1990,81 +2710,101 @@ private fun bestScoreValue(metric: BestScoreMetric, score: UserScore): String =
 @Composable
 private fun MedalTableCard(
     table: MedalLevelTable,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     note: String? = null,
 ) {
+    val fitsWidth = table.levels.size <= 6
+    val scrollState = rememberScrollState()
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         shape = RoundedCornerShape(16.dp),
     ) {
-        Column(Modifier.padding(vertical = 10.dp)) {
-            Text(
-                table.title,
-                modifier = Modifier.padding(horizontal = 12.dp),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                "Counts are exact; higher medals are not counted again in lower rows.",
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Column(
+        Column(Modifier.padding(vertical = 6.dp)) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                    .clickable { onExpandedChange(!expanded) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.width(48.dp))
-                    table.levels.forEach { level ->
-                        Text(
-                            level,
-                            modifier = Modifier.width(36.dp),
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Black,
-                        )
-                    }
+                Text(
+                    table.title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    if (expanded) "Collapse" else "Expand",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            if (expanded) {
+                val tableModifier = if (fitsWidth) {
+                    Modifier.fillMaxWidth()
+                } else {
+                    Modifier.horizontalScroll(scrollState)
                 }
-                Spacer(Modifier.height(3.dp))
-                table.rows.forEachIndexed { index, row ->
-                    if (index == 4) Spacer(Modifier.height(4.dp))
+                Column(
+                    modifier = tableModifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                ) {
                     Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(5.dp))
-                            .background(medalRowColor(row.label)),
+                        modifier = if (fitsWidth) Modifier.fillMaxWidth() else Modifier,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            row.label,
-                            modifier = Modifier
-                                .width(48.dp)
-                                .padding(start = 6.dp, top = 4.dp, bottom = 4.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Black,
-                            color = medalLabelColor(row.label),
-                        )
-                        row.counts.forEach { count ->
+                        Spacer(Modifier.width(48.dp))
+                        table.levels.forEach { level ->
                             Text(
-                                count.takeIf { it > 0 }?.toString() ?: "·",
-                                modifier = Modifier.width(36.dp),
+                                level,
+                                modifier = if (fitsWidth) Modifier.weight(1f) else Modifier.width(36.dp),
                                 textAlign = TextAlign.Center,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Black,
                             )
                         }
                     }
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(3.dp))
+                    table.rows.forEachIndexed { index, row ->
+                        if (index == 4) Spacer(Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier
+                                .then(if (fitsWidth) Modifier.fillMaxWidth() else Modifier)
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(medalRowColor(row.label)),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                row.label,
+                                modifier = Modifier
+                                    .width(48.dp)
+                                    .padding(start = 6.dp, top = 4.dp, bottom = 4.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Black,
+                                color = medalLabelColor(row.label),
+                            )
+                            row.counts.forEach { count ->
+                                Text(
+                                    count.takeIf { it > 0 }?.toString() ?: "·",
+                                    modifier = if (fitsWidth) Modifier.weight(1f) else Modifier.width(36.dp),
+                                    textAlign = TextAlign.Center,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(2.dp))
+                    }
                 }
-            }
-            note?.let {
-                Text(
-                    it,
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                note?.let {
+                    Text(
+                        it,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -2134,21 +2874,28 @@ private fun DxNetProfileCard(
     val density = LocalDensity.current
     val nameFontSize = with(density) { 12.dp.toSp() }
     val starFontSize = with(density) { 13.dp.toSp() }
+    val hasPlayCounts = profile.currentVersionPlayCount != null || profile.totalPlayCount != null
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .aspectRatio(2.9f),
+            .aspectRatio(if (hasPlayCounts) 2.3f else 2.9f),
         shape = RoundedCornerShape(8.dp),
         color = Color(0xFFC5ECFA),
         shadowElevation = 2.dp,
     ) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(5.dp),
         ) {
             Surface(
-                modifier = Modifier.fillMaxSize(),
+                modifier = if (hasPlayCounts) {
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                } else {
+                    Modifier.fillMaxSize()
+                },
                 color = Color(0xFFFCFEFF),
                 shape = RoundedCornerShape(5.dp),
                 border = BorderStroke(1.dp, Color(0xFFC7D1D6)),
@@ -2271,6 +3018,31 @@ private fun DxNetProfileCard(
                                 )
                             }
                         }
+                    }
+                }
+            }
+            if (hasPlayCounts) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    profile.currentVersionPlayCount?.let { count ->
+                        Text(
+                            "play count of current version : ${formatCount(count)}",
+                            fontSize = 8.sp,
+                            lineHeight = 10.sp,
+                            color = Color(0xFF17455A),
+                        )
+                    }
+                    profile.totalPlayCount?.let { count ->
+                        Text(
+                            "maimaiDX total play count : ${formatCount(count)}",
+                            fontSize = 8.sp,
+                            lineHeight = 10.sp,
+                            color = Color(0xFF17455A),
+                        )
                     }
                 }
             }

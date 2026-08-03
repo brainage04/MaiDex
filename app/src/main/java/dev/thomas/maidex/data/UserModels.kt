@@ -115,7 +115,81 @@ data class PlayerProfile(
     val titleBackgroundUrl: String = "",
     val ratingBaseUrl: String = "",
     val starIconUrl: String = "",
+    val currentVersionPlayCount: Int? = null,
+    val totalPlayCount: Int? = null,
     val importedAt: Long = Instant.now().toEpochMilli(),
+)
+
+data class CircleMember(
+    val key: String,
+    val name: String,
+    val points: Int,
+    val role: String = "",
+    val avatarUrl: String = "",
+    val isCurrentUser: Boolean = false,
+)
+
+data class CircleReward(
+    val pointsRequired: Int,
+    val name: String,
+    val imageUrl: String = "",
+    val earned: Boolean = false,
+)
+
+data class CircleInfoItem(
+    val label: String,
+    val value: String,
+)
+
+data class CirclePageInfo(
+    val title: String,
+    val text: String,
+)
+
+data class CircleData(
+    val month: String,
+    val name: String,
+    val code: String = "",
+    val leader: String = "",
+    val comment: String = "",
+    val tags: List<String> = emptyList(),
+    val circleClass: String = "",
+    val totalPoints: Int = 0,
+    val regionalRank: Int? = null,
+    val rankingLabel: String = "",
+    val memberCount: Int? = null,
+    val daysUntilReset: Int? = null,
+    val nextRewardPoints: Int? = null,
+    val updatedAt: String = "",
+    val characterUrl: String = "",
+    val backgroundUrl: String = "",
+    val members: List<CircleMember> = emptyList(),
+    val rewards: List<CircleReward> = emptyList(),
+    val information: List<CircleInfoItem> = emptyList(),
+    val pages: List<CirclePageInfo> = emptyList(),
+    val importedAt: Long = Instant.now().toEpochMilli(),
+) {
+    val key: String get() = code.ifBlank { normalizeSearch(name) }
+}
+
+data class CircleDailySnapshot(
+    val day: String,
+    val capturedAt: Long,
+    val circle: CircleData,
+)
+
+data class PlayCountSnapshot(
+    val day: String,
+    val capturedAt: Long,
+    val currentVersionPlayCount: Int,
+    val totalPlayCount: Int,
+)
+
+data class TrackingSettings(
+    val syncHour: Int = 7,
+    val lastAttemptAt: Long = 0L,
+    val lastSuccessAt: Long = 0L,
+    val lastError: String = "",
 )
 
 data class ImportResult(
@@ -123,4 +197,5 @@ data class ImportResult(
     val scores: List<UserScore>,
     val playDetails: List<PlayDetail>,
     val unmatchedCharts: Int,
+    val circle: CircleData? = null,
 )

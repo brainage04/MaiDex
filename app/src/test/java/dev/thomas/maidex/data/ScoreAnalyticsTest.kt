@@ -10,21 +10,25 @@ class ScoreAnalyticsTest {
         val lower = chart(2, "Lower", "10+", 10.8)
         val utage = chart(3, "Utage", "13+?", 13.6, type = "utage")
         val unratedUtage = chart(4, "Unrated", "*", 0.0, type = "utage")
+        val beginner = chart(5, "Beginner", "1", 1.0)
         val summary = ScoreAnalytics.summarize(
-            listOf(high, lower, utage, unratedUtage),
+            listOf(high, lower, utage, unratedUtage, beginner),
             mapOf(
                 high.chartKey to score(high, combo = ComboMedal.AP_PLUS, sync = SyncMedal.FDX_PLUS),
                 lower.chartKey to score(lower, combo = ComboMedal.FC, sync = SyncMedal.FS),
                 utage.chartKey to score(utage, combo = ComboMedal.AP, sync = SyncMedal.FDX),
                 unratedUtage.chartKey to score(unratedUtage, combo = ComboMedal.FC_PLUS, sync = SyncMedal.FS_PLUS),
+                beginner.chartKey to score(beginner, combo = ComboMedal.FC_PLUS),
             ),
         )
 
-        assertEquals(4, summary.playedCharts)
-        assertEquals(1, summary.highLevels.count("AP+", "14+"))
-        assertEquals(0, summary.highLevels.count("AP", "14+"))
-        assertEquals(1, summary.lowerLevels.count("FC", "10+"))
-        assertEquals(1, summary.lowerLevels.count("FS", "10+"))
+        assertEquals(5, summary.playedCharts)
+        assertEquals(ScoreAnalytics.standardLevelBands, summary.levelTables.map(MedalLevelTable::levels))
+        assertEquals(1, summary.tableFor("14+").count("AP+", "14+"))
+        assertEquals(0, summary.tableFor("14+").count("AP", "14+"))
+        assertEquals(1, summary.tableFor("10+").count("FC", "10+"))
+        assertEquals(1, summary.tableFor("10+").count("FS", "10+"))
+        assertEquals(1, summary.tableFor("1").count("FC+", "1"))
         assertEquals(1, summary.utage.count("AP", "13+?"))
         assertEquals(1, summary.utage.count("FDX", "13+?"))
         assertEquals(1, summary.utage.count("FC+", "*"))
@@ -58,6 +62,9 @@ class ScoreAnalyticsTest {
         assertEquals("FDX+", best.getValue(BestScoreMetric.FDX_PLUS).chart?.title)
         assertEquals("Best percentage", best.getValue(BestScoreMetric.DX_SCORE).chart?.title)
     }
+
+    private fun ScoreAnalyticsSummary.tableFor(level: String): MedalLevelTable =
+        levelTables.single { level in it.levels }
 
     private fun MedalLevelTable.count(row: String, level: String): Int {
         val rowIndex = rows.indexOfFirst { it.label == row }
