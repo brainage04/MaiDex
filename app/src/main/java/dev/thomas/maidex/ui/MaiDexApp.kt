@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.ReportDrawnWhen
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -100,6 +101,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -116,6 +118,7 @@ import dev.thomas.maidex.DxNetLoginActivity
 import dev.thomas.maidex.CatalogUiState
 import dev.thomas.maidex.ImportStatus
 import dev.thomas.maidex.MainViewModel
+import dev.thomas.maidex.R
 import dev.thomas.maidex.data.AccountRegion
 import dev.thomas.maidex.data.BestScore
 import dev.thomas.maidex.data.BestScoreMetric
@@ -669,106 +672,165 @@ private fun ChartCard(
     onClick: () -> Unit,
     onUnlockGuide: (String) -> Unit,
 ) {
+    val accentColor = difficultyColor(chart.difficulty)
+    val typeIconUrl = DxNetAssets.chartTypeIconUrl(chart.displayType)
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = chartCardColor(chart.difficulty)),
-        border = BorderStroke(2.dp, chartCardBorderColor(chart.difficulty)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFB)),
+        border = BorderStroke(3.dp, accentColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
     ) {
-        Row(modifier = Modifier.padding(8.dp)) {
-            AsyncImage(
-                model = chart.imageUrl,
-                contentDescription = "Cover art for ${chart.title}",
-                modifier = Modifier
-                    .size(92.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.White.copy(alpha = 0.72f)),
-                contentScale = ContentScale.Crop,
-            )
-            Spacer(Modifier.width(9.dp))
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
+        Column(
+            modifier = Modifier.padding(7.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Color(0xFF313131),
-                    shape = RoundedCornerShape(6.dp),
-                ) {
-                    SongTitleIdentity(
-                        chart = chart,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                        color = Color.White,
+                if (typeIconUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = typeIconUrl,
+                        contentDescription = "${chart.displayType} chart",
+                        modifier = Modifier
+                            .width(54.dp)
+                            .height(22.dp),
+                        contentScale = ContentScale.Fit,
+                    )
+                } else {
+                    Text(
+                        chart.displayType,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Black,
+                        color = accentColor,
                     )
                 }
+                Spacer(Modifier.weight(1f))
                 Text(
-                    titleWithRomanization(chart.artist, chart.artistRomanized),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF202020),
+                    listOfNotNull(
+                        chart.chartVersion,
+                        chart.bpm?.let { "$it BPM" },
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF17344E),
+                    textAlign = TextAlign.End,
                 )
+            }
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(5.dp),
+                    color = Color.White,
+                    border = BorderStroke(3.dp, accentColor),
+                    shadowElevation = 2.dp,
+                ) {
+                    AsyncImage(
+                        model = chart.imageUrl,
+                        contentDescription = "Cover art for ${chart.title}",
+                        modifier = Modifier.size(156.dp),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = accentColor,
+                shape = RoundedCornerShape(4.dp),
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Surface(
-                        color = difficultyColor(chart.difficulty),
-                        shape = RoundedCornerShape(7.dp),
-                    ) {
-                        Text(
-                            chart.displayDifficulty,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                        )
-                    }
                     Text(
-                        buildString {
-                            append(chart.level ?: "?")
-                            chart.constant?.let { append(" (${String.format(Locale.US, "%.1f", it)})") }
-                        },
+                        chart.displayDifficulty,
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
-                        color = Color(0xFF202020),
+                        color = Color.White,
                     )
-                    val typeIconUrl = DxNetAssets.chartTypeIconUrl(chart.displayType)
-                    if (typeIconUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = typeIconUrl,
-                            contentDescription = "${chart.displayType} chart",
-                            modifier = Modifier
-                                .width(44.dp)
-                                .height(18.dp),
-                            contentScale = ContentScale.Fit,
-                        )
-                    } else {
+                    Text(
+                        buildString {
+                            append("Lv")
+                            append(chart.level ?: "?")
+                            chart.constant?.let {
+                                append(" · C")
+                                append(String.format(Locale.US, "%.1f", it))
+                            }
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White,
+                    )
+                }
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF102E4B),
+                shape = RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp),
+            ) {
+                SongTitleIdentity(
+                    chart = chart,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF173F62),
+                shape = RoundedCornerShape(bottomStart = 5.dp, bottomEnd = 5.dp),
+            ) {
+                Text(
+                    titleWithRomanization(chart.artist, chart.artistRomanized),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            if (score != null) {
+                DxNetScorePanel(chart = chart, score = score)
+            } else {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color(0xFFEEF1F3),
+                    shape = RoundedCornerShape(5.dp),
+                    border = BorderStroke(1.dp, Color(0xFFAEB9C0)),
+                ) {
+                    Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
                         Text(
-                            chart.displayType,
+                            "No imported DX NET score",
                             style = MaterialTheme.typography.labelMedium,
-                            color = Color(0xFF202020),
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF32434D),
                         )
+                        chart.noteDesigner?.takeIf(String::isNotBlank)?.let { designer ->
+                            Text(
+                                "NOTES DESIGNER · " +
+                                    titleWithRomanization(designer, chart.noteDesignerRomanized),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF4E5E67),
+                            )
+                        }
                     }
                 }
-                Text(
-                    listOfNotNull(chart.chartVersion, chart.bpm?.let { "$it BPM" }).joinToString(" · "),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF383838),
+            }
+            chart.unlockInfo.forEach { info ->
+                UnlockTileInfo(
+                    info = info,
+                    onOpenGuide = info.guideEntryId?.let { entryId ->
+                        { onUnlockGuide(entryId) }
+                    },
                 )
-                chart.unlockInfo.forEach { info ->
-                    UnlockTileInfo(
-                        info = info,
-                        onOpenGuide = info.guideEntryId?.let { entryId ->
-                            { onUnlockGuide(entryId) }
-                        },
-                    )
-                }
-                score?.let {
-                    DxNetScorePanel(chart = chart, score = it)
-                }
             }
         }
     }
@@ -782,23 +844,24 @@ private fun DxNetScorePanel(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = scorePanelColor(score.grade),
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, Color.Black.copy(alpha = 0.18f)),
+        shape = RoundedCornerShape(5.dp),
+        border = BorderStroke(1.dp, Color(0xFF8D999F)),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     String.format(Locale.US, "%.4f%%", score.achievement),
                     modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
-                    color = Color(0xFF202020),
+                    color = Color(0xFF172126),
                 )
                 AsyncImage(
                     model = DxNetAssets.gradeIconUrl(score.grade),
@@ -808,26 +871,12 @@ private fun DxNetScorePanel(
                         .height(24.dp),
                     contentScale = ContentScale.Fit,
                 )
-                RatingCalculator.chartRating(chart, score)?.let {
-                    Text(
-                        "Rt $it",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF202020),
-                    )
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
                 if (score.comboMedal != ComboMedal.NONE) {
                     AsyncImage(
                         model = DxNetAssets.comboIconUrl(score.comboMedal),
                         contentDescription = score.comboMedal.label,
                         modifier = Modifier
-                            .width(34.dp)
+                            .width(32.dp)
                             .height(27.dp),
                         contentScale = ContentScale.Fit,
                     )
@@ -837,15 +886,53 @@ private fun DxNetScorePanel(
                         model = DxNetAssets.syncIconUrl(score.syncMedal),
                         contentDescription = score.syncMedal.label,
                         modifier = Modifier
-                            .width(34.dp)
+                            .width(32.dp)
                             .height(27.dp),
                         contentScale = ContentScale.Fit,
                     )
                 }
-                DxScoreLine(
-                    score = score,
-                    modifier = Modifier.weight(1f),
-                )
+            }
+            DxScoreLine(score = score)
+            HorizontalDivider(color = Color.Black.copy(alpha = 0.16f))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "NOTES DESIGNER",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFF16804A),
+                    )
+                    Text(
+                        titleWithRomanization(
+                            chart.noteDesigner.orEmpty(),
+                            chart.noteDesignerRomanized,
+                        ).ifBlank { "—" },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF26373F),
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    RatingCalculator.chartRating(chart, score)?.let {
+                        Text(
+                            "Rt $it",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF172126),
+                        )
+                    }
+                    chart.bpm?.let {
+                        Text(
+                            "BPM $it",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF4D5A61),
+                        )
+                    }
+                }
             }
         }
     }
@@ -857,6 +944,7 @@ private fun SongTitleIdentity(
     prominent: Boolean = false,
     modifier: Modifier = Modifier,
     color: Color = Color.Unspecified,
+    textAlign: TextAlign = TextAlign.Start,
 ) {
     Text(
         text = songIdentityTitle(
@@ -872,6 +960,7 @@ private fun SongTitleIdentity(
         },
         fontWeight = if (prominent) FontWeight.Black else FontWeight.Bold,
         color = color,
+        textAlign = textAlign,
     )
 }
 
@@ -964,35 +1053,65 @@ private fun DxScoreLine(
     score: UserScore,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            "DX ${dxScoreText(score)}",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = Color(0xFF383838),
-        )
-        if (score.dxStarCount > 0) {
-            AsyncImage(
-                model = DxNetAssets.dxStarIconUrl(score.dxStarCount),
-                contentDescription = "${score.dxStarCount} DX stars",
-                modifier = Modifier
-                    .width(66.dp)
-                    .height(16.dp),
-                contentScale = ContentScale.Fit,
+    val percentage = score.dxScorePercentage
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                color = Color(0xFF169B55),
+                shape = RoundedCornerShape(3.dp),
+            ) {
+                Text(
+                    "DX SCORE",
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White,
+                )
+            }
+            Text(
+                "${score.dxScore} / ${score.maxDxScore}",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Black,
+                color = Color(0xFF26373F),
+            )
+            DxStarImage(score.dxStarCount)
+        }
+        percentage?.let {
+            Text(
+                "${String.format(Locale.US, "%.2f", it)}% of maximum DX score",
+                modifier = Modifier.align(Alignment.End),
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF4D5A61),
             )
         }
     }
 }
 
-private fun dxScoreText(score: UserScore): String {
-    val percentage = score.dxScorePercentage
-        ?: return "${score.dxScore}/${score.maxDxScore}"
-    return "${score.dxScore}/${score.maxDxScore} (${String.format(Locale.US, "%.2f", percentage)}%)"
+@Composable
+private fun DxStarImage(stars: Int) {
+    val resourceId = when (stars) {
+        1 -> R.drawable.dxstar_1
+        2 -> R.drawable.dxstar_2
+        3 -> R.drawable.dxstar_3
+        4 -> R.drawable.dxstar_4
+        5 -> R.drawable.dxstar_5
+        else -> return
+    }
+    Image(
+        painter = painterResource(resourceId),
+        contentDescription = "$stars DX stars",
+        modifier = Modifier
+            .width(94.dp)
+            .height(16.dp),
+        contentScale = ContentScale.Fit,
+    )
 }
+
 
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -3933,25 +4052,7 @@ private fun difficultyColor(value: String): Color = when (value) {
     else -> Color(0xFF52636F)
 }
 
-private fun chartCardColor(value: String): Color = when (value) {
-    "basic" -> Color(0xFF6FE163)
-    "advanced" -> Color(0xFFF8DF3A)
-    "expert" -> Color(0xFFFF828E)
-    "master" -> Color(0xFFC27FF4)
-    "remaster" -> Color(0xFFE5DDEA)
-    "utage" -> Color(0xFFFF6FFD)
-    else -> Color(0xFFE4EBEF)
-}
 
-private fun chartCardBorderColor(value: String): Color = when (value) {
-    "basic" -> Color(0xFF025235)
-    "advanced" -> Color(0xFFC7450C)
-    "expert" -> Color(0xFFC02138)
-    "master" -> Color(0xFF67148D)
-    "remaster" -> Color(0xFF8C2CD5)
-    "utage" -> Color(0xFFD00BB1)
-    else -> Color(0xFF52636F)
-}
 
 private fun scorePanelColor(grade: Grade): Color = when (grade) {
     Grade.SSS_PLUS,
