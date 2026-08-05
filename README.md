@@ -30,12 +30,12 @@ There is no project-owned backend service. DX NET authentication is performed in
 ## Android configuration
 
 - Application ID: `io.github.brainage04.maidex`
-- Android namespace and Kotlin source package: `dev.thomas.maidex`
+- Android namespace and Kotlin source package: `io.github.brainage04.maidex`
 - Minimum SDK: 26
 - Target and compile SDK: 36
 - Java/Kotlin toolchain: 17
 
-The application ID and source namespace are currently separate intentionally: this migration changes the install/package identity without moving the Kotlin source tree.
+The Application ID, Android namespace, and Kotlin source package now use the same reverse-domain identifier.
 
 ## Build and test
 

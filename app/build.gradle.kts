@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "dev.thomas.maidex"
+    namespace = "io.github.brainage04.maidex"
     compileSdk = 36
 
     defaultConfig {

@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "dev.thomas.maidex.baselineprofile"
+    namespace = "io.github.brainage04.maidex.baselineprofile"
     compileSdk = 36
 
     defaultConfig {
