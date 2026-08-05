@@ -9,7 +9,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "dev.thomas.maidex"
+        applicationId = "io.github.brainage04.maidex"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
