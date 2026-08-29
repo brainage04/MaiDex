@@ -11,7 +11,7 @@ MaiDex is an Android companion app for **maimai DX** players. It combines an off
 - Import DX NET profile data, scores, medals, recent play history, and judgment details for Japan or International accounts.
 - Calculate chart ratings, total rating, rating milestones, achievement loss, and DX score loss.
 - View score statistics, medal tables, best scores, Dan course guides, Chiho/Class Battle unlock guides, and chart details.
-- Track circle history and play counts with a configurable daily background sync.
+- Track circle history and play counts with an hourly background sync.
 
 ## Architecture
 
@@ -23,7 +23,7 @@ The app is a Kotlin/Jetpack Compose application with a small MVVM-style data flo
 - `CatalogRepository` installs and reads the bundled read-only catalog database.
 - `UserDataRepository` stores imported scores, play details, profile data, and tracking snapshots locally.
 - `MaimaiDxClient` uses OkHttp and Jsoup to read authenticated DX NET pages.
-- `CircleTrackingWorker` schedules authenticated daily tracking through WorkManager.
+- `CircleTrackingWorker` schedules authenticated hourly tracking through WorkManager.
 
 There is no project-owned backend service. DX NET authentication is performed in an Android WebView, and imported account data is stored on the device. Profile images are cached only from allowlisted official DX NET hosts.
 
@@ -63,6 +63,11 @@ python3 scripts/build_catalog.py
 ```
 
 The generator uses `pykakasi` for generated romanisation. It records the catalog update time and upstream source URLs in the database metadata.
+
+The installed app also checks the primary source once per hour with conditional HTTP requests.
+When the source changes, MaiDex streams it into a validated local SQLite database while retaining
+the bundled community aliases and romanisations. The refreshed catalog becomes active on the next
+app launch; the bundled database remains the offline fallback.
 
 Primary catalog source:
 

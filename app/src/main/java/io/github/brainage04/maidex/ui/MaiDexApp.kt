@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.CheckCircle
@@ -77,29 +79,35 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -107,6 +115,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -135,6 +144,8 @@ import io.github.brainage04.maidex.data.ClassBattleMilestone
 import io.github.brainage04.maidex.data.FilterOptions
 import io.github.brainage04.maidex.data.CircleDailySnapshot
 import io.github.brainage04.maidex.data.CircleData
+import io.github.brainage04.maidex.data.CirclePageInfo
+import io.github.brainage04.maidex.data.CirclePageType
 import io.github.brainage04.maidex.data.MedalLevelTable
 import io.github.brainage04.maidex.data.SongChart
 import io.github.brainage04.maidex.data.SongUnlockInfo
@@ -161,6 +172,7 @@ import io.github.brainage04.maidex.rating.RatingCalculator
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -176,110 +188,107 @@ fun MaiDexApp(viewModel: MainViewModel) {
     var showScoreStats by remember { mutableStateOf(false) }
     var showCircle by remember { mutableStateOf(false) }
     var selectedUnlockGuideEntryId by remember { mutableStateOf<String?>(null) }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    val closeDrawerAndOpen: (() -> Unit) -> Unit = { open ->
+        scope.launch {
+            drawerState.close()
+            open()
+        }
+    }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0),
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.statusBarsPadding(),
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
-                title = {
-                    Column {
-                        Text("MaiDex", fontWeight = FontWeight.Black)
-                        if (state.info != null) {
-                            Text(
-                                "${state.visibleSongCount} songs · ${state.charts.size} charts",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { showDanGuide = true }) {
-                        Icon(Icons.Default.MilitaryTech, contentDescription = "Dan course guides")
-                    }
-                    IconButton(onClick = {
-                        selectedUnlockGuideEntryId = null
-                        showUnlockGuide = true
-                    }) {
-                        Icon(Icons.Default.Map, contentDescription = "Chiho and class battle guides")
-                    }
-                    IconButton(onClick = { showAccount = true }) {
-                        val profile = state.profile
-                        if (profile?.avatarUrl.isNullOrBlank()) {
-                            Icon(Icons.Default.AccountCircle, contentDescription = "DX NET account")
-                        } else {
-                            DxNetAvatar(
-                                profile = profile,
-                                modifier = Modifier.size(32.dp),
-                            )
-                        }
-                    }
-                    IconButton(onClick = { showAbout = true }) {
-                        Icon(Icons.Default.Info, contentDescription = "Info")
-                    }
-                    Box(
-                        modifier = Modifier.size(48.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        IconButton(onClick = { showFilters = true }) {
-                            Icon(Icons.Default.FilterList, contentDescription = "Open filters")
-                        }
-                        if (state.filters.activeCount > 0) {
-                            Badge(
-                                modifier = Modifier
-                                    .align(Alignment.CenterEnd)
-                                    .offset(x = (-2).dp, y = (-6).dp)
-                                    .size(20.dp),
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                            ) {
-                                Text(
-                                    state.filters.activeCount.toString(),
-                                    fontWeight = FontWeight.Bold,
-                                )
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    AppDrawerContent(
+                        profile = state.profile,
+                        onAccount = { closeDrawerAndOpen { showAccount = true } },
+                        onCircle = { closeDrawerAndOpen { showCircle = true } },
+                        onScoreStats = { closeDrawerAndOpen { showScoreStats = true } },
+                        onDanGuide = { closeDrawerAndOpen { showDanGuide = true } },
+                        onUnlockGuide = {
+                            closeDrawerAndOpen {
+                                selectedUnlockGuideEntryId = null
+                                showUnlockGuide = true
                             }
+                        },
+                        onAbout = { closeDrawerAndOpen { showAbout = true } },
+                    )
+                }
+            },
+        ) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Scaffold(
+                    contentWindowInsets = WindowInsets(0),
+                    topBar = {
+                        CenterAlignedTopAppBar(
+                            modifier = Modifier.statusBarsPadding(),
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.background,
+                            ),
+                            title = {
+                                Text(
+                                    "MaiDex",
+                                    fontWeight = FontWeight.Black,
+                                    maxLines = 1,
+                                )
+                            },
+                            actions = {
+                                if (state.info != null) {
+                                    Text(
+                                        "${state.visibleSongCount} songs\n${state.charts.size} charts",
+                                        modifier = Modifier.padding(end = 12.dp),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.End,
+                                        maxLines = 2,
+                                    )
+                                }
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                    Icon(Icons.Default.Menu, contentDescription = "Open navigation menu")
+                                }
+                            },
+                        )
+                    },
+                ) { padding ->
+                    when {
+                        state.isLoading -> Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator()
                         }
+
+                        state.error != null -> Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(state.error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                        }
+
+                        else -> CatalogContent(
+                            state = state,
+                            modifier = Modifier.padding(padding),
+                            onSearch = viewModel::setSearch,
+                            onSort = viewModel::setSort,
+                            onToggleSortOrder = viewModel::toggleSortOrder,
+                            onOpenFilters = { showFilters = true },
+                            onClearFilters = viewModel::clearFilters,
+                            onChart = { selectedChart = it },
+                            onUnlockGuide = { entryId ->
+                                selectedUnlockGuideEntryId = entryId
+                                showUnlockGuide = true
+                            },
+                        )
                     }
-                },
-            )
-        },
-    ) { padding ->
-        when {
-            state.isLoading -> Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
+                }
             }
-
-            state.error != null -> Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(state.error.orEmpty(), color = MaterialTheme.colorScheme.error)
-            }
-
-            else -> CatalogContent(
-                state = state,
-                modifier = Modifier.padding(padding),
-                onSearch = viewModel::setSearch,
-                onSort = viewModel::setSort,
-                onToggleSortOrder = viewModel::toggleSortOrder,
-                onClearFilters = viewModel::clearFilters,
-                onChart = { selectedChart = it },
-                onUnlockGuide = { entryId ->
-                    selectedUnlockGuideEntryId = entryId
-                    showUnlockGuide = true
-                },
-            )
         }
     }
 
@@ -313,19 +322,10 @@ fun MaiDexApp(viewModel: MainViewModel) {
         AccountDialog(
             profile = state.profile,
             importStatus = state.importStatus,
-            hasScores = state.scores.isNotEmpty(),
             playCountSnapshots = state.playCountSnapshots,
             onImport = viewModel::importAccount,
             onClear = viewModel::clearAccount,
             onDismissStatus = viewModel::dismissImportStatus,
-            onScoreStats = {
-                showAccount = false
-                showScoreStats = true
-            },
-            onCircle = {
-                showAccount = false
-                showCircle = true
-            },
             onDismiss = { showAccount = false },
         )
     }
@@ -334,7 +334,6 @@ fun MaiDexApp(viewModel: MainViewModel) {
             history = state.circleHistory,
             snapshots = state.circleSnapshots,
             trackingSettings = state.trackingSettings,
-            onTrackingHour = viewModel::setTrackingHour,
             onDismiss = { showCircle = false },
         )
     }
@@ -384,6 +383,91 @@ fun MaiDexApp(viewModel: MainViewModel) {
 }
 
 @Composable
+private fun AppDrawerContent(
+    profile: PlayerProfile?,
+    onAccount: () -> Unit,
+    onCircle: () -> Unit,
+    onScoreStats: () -> Unit,
+    onDanGuide: () -> Unit,
+    onUnlockGuide: () -> Unit,
+    onAbout: () -> Unit,
+) {
+    ModalDrawerSheet(
+        modifier = Modifier
+            .fillMaxHeight()
+            .widthIn(min = 280.dp, max = 360.dp),
+        drawerShape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp),
+    ) {
+        Text(
+            "MaiDex",
+            modifier = Modifier.padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 8.dp),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Black,
+        )
+        Text(
+            profile?.name ?: "Offline catalog",
+            modifier = Modifier.padding(horizontal = 24.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        HorizontalDivider(Modifier.padding(vertical = 16.dp))
+        NavigationDrawerItem(
+            label = { Text("DX NET account") },
+            selected = false,
+            onClick = onAccount,
+            icon = {
+                if (profile?.avatarUrl.isNullOrBlank()) {
+                    Icon(Icons.Default.AccountCircle, contentDescription = null)
+                } else {
+                    DxNetAvatar(profile = profile, modifier = Modifier.size(28.dp))
+                }
+            },
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+        NavigationDrawerItem(
+            label = { Text("Circle data") },
+            selected = false,
+            onClick = onCircle,
+            icon = { Icon(Icons.Default.Groups, contentDescription = null) },
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+        NavigationDrawerItem(
+            label = { Text("Score stats") },
+            selected = false,
+            onClick = onScoreStats,
+            icon = { Icon(Icons.Default.BarChart, contentDescription = null) },
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        NavigationDrawerItem(
+            label = { Text("Dan courses") },
+            selected = false,
+            onClick = onDanGuide,
+            icon = { Icon(Icons.Default.MilitaryTech, contentDescription = null) },
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+        NavigationDrawerItem(
+            label = { Text("Chiho and class battle guides") },
+            selected = false,
+            onClick = onUnlockGuide,
+            icon = { Icon(Icons.Default.Map, contentDescription = null) },
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+        Spacer(Modifier.weight(1f))
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        NavigationDrawerItem(
+            label = { Text("About MaiDex") },
+            selected = false,
+            onClick = onAbout,
+            icon = { Icon(Icons.Default.Info, contentDescription = null) },
+            modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 16.dp),
+        )
+    }
+}
+
+@Composable
 private fun InfoDialog(
     info: CatalogInfo?,
     onDismiss: () -> Unit,
@@ -423,14 +507,19 @@ private fun InfoDialog(
                 }
                 InfoSection(
                     title = "Offline catalog",
-                    body = "Search, filters, chart constants, note counts, unlock guides, and Dan courses " +
-                        "are bundled with the app and remain available without a connection.",
+                    body = "MaiDex starts with a bundled catalog, then checks arcade-songs every hour. " +
+                        "A changed source is rebuilt into a validated local database and becomes active " +
+                        "on the next app launch; the current catalog always remains available offline.",
                 )
                 InfoSection(
-                    title = "Metadata",
-                    body = "Song data comes from arcade-songs and was updated " +
-                        "${info?.updateTime?.take(10).orEmpty().ifBlank { "with this build" }}. " +
-                        "Community romanisations and aliases improve title and artist search.",
+                    title = "Catalog freshness",
+                    body = "arcade-songs does not publish a fixed update schedule. Its current dataset reports " +
+                        "${info?.updateTime?.take(10).orEmpty().ifBlank { "no source date" }}. " +
+                        if ((info?.lastCheckedAt ?: 0L) > 0L) {
+                            "MaiDex last checked it ${formatTrackedTime(info?.lastCheckedAt ?: 0L)}."
+                        } else {
+                            "MaiDex will check it when Android next runs the hourly updater."
+                        },
                 )
                 InfoSection(
                     title = "DX NET and privacy",
@@ -439,16 +528,16 @@ private fun InfoDialog(
                         "in app-private storage on this device. MaiDex does not store your SEGA ID password.",
                 )
                 InfoSection(
-                    title = "Daily tracking",
-                    body = "MaiDex checks DX NET near the selected local hour while the saved session remains " +
-                        "valid. Android may delay the check for battery or network reasons. Circle history " +
-                        "starts with the first successful sync; DX NET cannot backfill unavailable months.",
+                    title = "Hourly DX NET tracking",
+                    body = "MaiDex asks Android to refresh circle, member, profile, and play-count data once " +
+                        "per hour while the saved session remains valid. Android may defer exact timing for " +
+                        "battery or network reasons; DX NET cannot backfill unavailable history.",
                 )
                 InfoSection(
                     title = "Images and matching",
                     body = "Cover art is cached after viewing, and profile/circle artwork is cached after Refresh. " +
-                        "DX NET scores are matched by song, chart type, difficulty, and level. A newly added " +
-                        "or renamed chart may remain unmatched until the offline catalog is updated.",
+                        "DX NET scores are matched by song, chart type, difficulty, and level. A source change " +
+                        "is downloaded hourly and used after the next app launch.",
                 )
             }
         },
@@ -508,6 +597,7 @@ private fun CatalogContent(
     onSearch: (String) -> Unit,
     onSort: (ChartSort) -> Unit,
     onToggleSortOrder: () -> Unit,
+    onOpenFilters: () -> Unit,
     onClearFilters: () -> Unit,
     onChart: (SongChart) -> Unit,
     onUnlockGuide: (String) -> Unit,
@@ -530,46 +620,81 @@ private fun CatalogContent(
             },
             label = { Text("Search") },
             placeholder = { Text("Title, romaji, artist, or notes designer") },
+            shape = RoundedCornerShape(12.dp),
         )
         CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 40.dp) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
-        ) {
-            SortMenu(
-                selected = state.sort,
-                onSelect = onSort,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            AssistChip(
-                onClick = onToggleSortOrder,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(state.sortOrder.label) },
-                leadingIcon = {
-                    Icon(
-                        if (state.sortOrder == SortOrder.ASCENDING) {
-                            Icons.Default.ArrowUpward
-                        } else {
-                            Icons.Default.ArrowDownward
-                        },
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-            )
-            if (state.filters.activeCount > 0) {
-                TextButton(
-                    onClick = onClearFilters,
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+            ) {
+                Row(
                     modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Default.Clear, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Clear filters")
+                    SortMenu(
+                        selected = state.sort,
+                        onSelect = onSort,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                    )
+                    OutlinedButton(
+                        onClick = onToggleSortOrder,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+                    ) {
+                        Icon(
+                            if (state.sortOrder == SortOrder.ASCENDING) {
+                                Icons.Default.ArrowUpward
+                            } else {
+                                Icons.Default.ArrowDownward
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            state.sortOrder.label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onOpenFilters,
+                        modifier = Modifier
+                            .width(IntrinsicSize.Min)
+                            .height(44.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
+                    ) {
+                        Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("Filters", maxLines = 1)
+                        if (state.filters.activeCount > 0) {
+                            Spacer(Modifier.width(5.dp))
+                            Badge {
+                                Text(
+                                    state.filters.activeCount.toString(),
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (state.filters.activeCount > 0) {
+                    TextButton(
+                        onClick = onClearFilters,
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Icon(Icons.Default.Clear, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Clear filters")
+                    }
                 }
             }
-        }
         }
         Spacer(Modifier.height(2.dp))
         if (state.charts.isEmpty()) {
@@ -610,11 +735,24 @@ private fun SortMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
-        AssistChip(
+        OutlinedButton(
             onClick = { expanded = true },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Sort: ${selected.label}") },
-        )
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+        ) {
+            Text(
+                selected.label,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Start,
+            )
+            Icon(
+                Icons.Default.ArrowDropDown,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             ChartSort.entries.forEach { option ->
                 DropdownMenuItem(
@@ -1162,33 +1300,57 @@ private fun DanGuideDialog(
                     }
                     TextButton(onClick = onDismiss) { Text("Close") }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AccountRegion.entries.forEach { option ->
-                        FilterChip(
-                            selected = region == option,
-                            onClick = { region = option },
-                            label = { Text(option.label) },
-                        )
-                    }
-                }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = RoundedCornerShape(12.dp),
                 ) {
-                    DanCourseGroup.entries.forEach { option ->
-                        FilterChip(
-                            selected = group == option,
-                            onClick = { group = option },
-                            label = {
-                                Text(
-                                    when (option) {
-                                        DanCourseGroup.NORMAL -> "Dan 1–10"
-                                        DanCourseGroup.TRUE -> "Shin Dan"
-                                        DanCourseGroup.URA -> "Ura Kaiden"
+                    Column(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            "Region",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AccountRegion.entries.forEach { option ->
+                                FilterChip(
+                                    selected = region == option,
+                                    onClick = { region = option },
+                                    label = { Text(option.label) },
+                                )
+                            }
+                        }
+                        HorizontalDivider(Modifier.padding(vertical = 2.dp))
+                        Text(
+                            "Dan type",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            DanCourseGroup.entries.forEach { option ->
+                                FilterChip(
+                                    selected = group == option,
+                                    onClick = { group = option },
+                                    label = {
+                                        Text(
+                                            when (option) {
+                                                DanCourseGroup.NORMAL -> "Dan 1–10"
+                                                DanCourseGroup.TRUE -> "Shin Dan"
+                                                DanCourseGroup.URA -> "Ura Kaiden"
+                                            },
+                                        )
                                     },
                                 )
-                            },
-                        )
+                            }
+                        }
                     }
                 }
                 Surface(
@@ -2040,14 +2202,11 @@ private fun <T> MultiSelectSection(
 @Composable
 private fun AccountDialog(
     profile: PlayerProfile?,
-    hasScores: Boolean,
     importStatus: ImportStatus,
     playCountSnapshots: List<PlayCountSnapshot>,
     onImport: (AccountRegion) -> Unit,
     onClear: () -> Unit,
     onDismissStatus: () -> Unit,
-    onScoreStats: () -> Unit,
-    onCircle: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var region by remember(profile) { mutableStateOf(profile?.region ?: AccountRegion.INTERNATIONAL) }
@@ -2106,17 +2265,6 @@ private fun AccountDialog(
                             label = { Text(option.label) },
                         )
                     }
-                    Spacer(Modifier.weight(1f))
-                    if (profile != null) {
-                        IconButton(onClick = onCircle) {
-                            Icon(Icons.Default.Groups, contentDescription = "Circle")
-                        }
-                    }
-                    if (profile != null && hasScores) {
-                        IconButton(onClick = onScoreStats) {
-                            Icon(Icons.Default.BarChart, contentDescription = "Score stats")
-                        }
-                    }
                 }
 
                 if (profile != null) {
@@ -2126,6 +2274,7 @@ private fun AccountDialog(
                             .padding(top = 6.dp, bottom = 8.dp)
                             .clickable { showProfileCloseUp = true },
                     )
+                    DxNetPlayCounts(profile)
                     if (playCountSnapshots.isNotEmpty()) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -2290,7 +2439,6 @@ private fun CircleDialog(
     history: List<CircleData>,
     snapshots: List<CircleDailySnapshot>,
     trackingSettings: TrackingSettings,
-    onTrackingHour: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val current = history.firstOrNull()
@@ -2354,7 +2502,7 @@ private fun CircleDialog(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     item(key = "tracking") {
-                        CircleTrackingCard(trackingSettings, onTrackingHour)
+                        CircleTrackingCard(trackingSettings)
                     }
                     if (current == null) {
                         item(key = "empty") {
@@ -2418,7 +2566,7 @@ private fun CircleDialog(
                         } else {
                             item(key = "tracking-empty") {
                                 Text(
-                                    "Point trends will appear after the first successful daily sync.",
+                                    "Point trends will appear after the first successful hourly sync.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -2433,36 +2581,21 @@ private fun CircleDialog(
                         items(history, key = { circle -> "month-${circle.month}-${circle.key}" }) { circle ->
                             CircleMonthCard(circle, initiallyExpanded = circle === current)
                         }
-                        if (current.information.isNotEmpty() || current.pages.isNotEmpty()) {
+                        val structuredPages = current.pages.filter { page ->
+                            page.type != CirclePageType.OTHER
+                        }
+                        if (structuredPages.isNotEmpty()) {
                             item(key = "details-heading") {
                                 CircleSectionHeading(
-                                    "DX NET page details",
-                                    "Imported labels and page text preserve information not covered above",
+                                    "DX NET circle sections",
+                                    "Profile, events, rewards, rankings, and members from the official pages",
                                 )
                             }
-                            if (current.information.isNotEmpty()) {
-                                item(key = "details") {
-                                    Card(
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                        ),
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(12.dp),
-                                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                                        ) {
-                                            current.information.forEach { item ->
-                                                CircleInfoRow(item.label, item.value)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                             items(
-                                current.pages,
-                                key = { page -> "page-${page.title}-${page.text.hashCode()}" },
+                                structuredPages,
+                                key = { page -> "page-${page.type}-${page.title}" },
                             ) { page ->
-                                CirclePageCard(page.title, page.text)
+                                CirclePageCard(page, current)
                             }
                         }
                     }
@@ -2473,11 +2606,7 @@ private fun CircleDialog(
 }
 
 @Composable
-private fun CircleTrackingCard(
-    settings: TrackingSettings,
-    onTrackingHour: (Int) -> Unit,
-) {
-    var hourMenuExpanded by remember { mutableStateOf(false) }
+private fun CircleTrackingCard(settings: TrackingSettings) {
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
@@ -2493,31 +2622,24 @@ private fun CircleTrackingCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Daily DX NET sync", fontWeight = FontWeight.Bold)
+                    Text("Hourly DX NET sync", fontWeight = FontWeight.Bold)
                     Text(
                         "Circle/member points and both play counts",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Box {
-                    OutlinedButton(onClick = { hourMenuExpanded = true }) {
-                        Text(String.format(Locale.US, "%02d:00", settings.syncHour))
-                    }
-                    DropdownMenu(
-                        expanded = hourMenuExpanded,
-                        onDismissRequest = { hourMenuExpanded = false },
-                    ) {
-                        (0..23).forEach { hour ->
-                            DropdownMenuItem(
-                                text = { Text(String.format(Locale.US, "%02d:00", hour)) },
-                                onClick = {
-                                    onTrackingHour(hour)
-                                    hourMenuExpanded = false
-                                },
-                            )
-                        }
-                    }
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shape = RoundedCornerShape(50),
+                ) {
+                    Text(
+                        "Every hour",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
             }
             val status = when {
@@ -2537,7 +2659,7 @@ private fun CircleTrackingCard(
                 },
             )
             Text(
-                "The saved DX NET session must still be valid. Android may delay background work " +
+                "The saved DX NET session must still be valid. Android may defer the exact run time " +
                     "because of battery or network restrictions.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2557,35 +2679,7 @@ private fun CircleOverviewCard(circle: CircleData) {
             verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             Text("Current month", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            if (circle.backgroundUrl.isNotBlank() || circle.characterUrl.isNotBlank()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(116.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                ) {
-                    circle.backgroundUrl.takeIf(String::isNotBlank)?.let { url ->
-                        AsyncImage(
-                            model = url,
-                            contentDescription = "Circle background",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
-                        )
-                    }
-                    circle.characterUrl.takeIf(String::isNotBlank)?.let { url ->
-                        AsyncImage(
-                            model = url,
-                            contentDescription = "Circle character",
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .align(Alignment.CenterEnd)
-                                .padding(4.dp),
-                            contentScale = ContentScale.Fit,
-                        )
-                    }
-                }
-            }
+            CircleProfileVisual(circle)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 InfoMetric(
                     value = formatCount(circle.totalPoints),
@@ -2605,7 +2699,6 @@ private fun CircleOverviewCard(circle: CircleData) {
             circle.daysUntilReset?.let { CircleInfoRow("Days until reset", it.toString()) }
             circle.nextRewardPoints?.let { CircleInfoRow("Points until next reward", formatCount(it)) }
             circle.updatedAt.takeIf(String::isNotBlank)?.let { CircleInfoRow("DX NET updated", it) }
-            circle.comment.takeIf(String::isNotBlank)?.let { CircleInfoRow("Comment", it) }
             if (circle.tags.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     circle.tags.forEach { tag ->
@@ -2622,12 +2715,88 @@ private fun CircleOverviewCard(circle: CircleData) {
                     }
                 }
             }
-            if (circle.rewards.isNotEmpty()) {
-                Text("Point rewards", fontWeight = FontWeight.Bold)
-                circle.rewards.sortedBy { it.pointsRequired }.forEach { reward ->
-                    CircleInfoRow(
-                        "${formatCount(reward.pointsRequired)} PT",
-                        (if (reward.earned) "Received · " else "") + reward.name,
+        }
+    }
+}
+
+@Composable
+private fun CircleProfileVisual(circle: CircleData) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(156.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.primaryContainer),
+    ) {
+        circle.backgroundUrl.takeIf(String::isNotBlank)?.let { url ->
+            AsyncImage(
+                model = url,
+                contentDescription = "Circle background",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
+        circle.characterUrl.takeIf(String::isNotBlank)?.let { url ->
+            AsyncImage(
+                model = url,
+                contentDescription = "Circle character",
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .align(Alignment.CenterEnd)
+                    .padding(4.dp),
+                contentScale = ContentScale.Fit,
+            )
+        }
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(10.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+            shape = RoundedCornerShape(10.dp),
+            shadowElevation = 2.dp,
+        ) {
+            Row(
+                modifier = Modifier.padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    modifier = Modifier.size(54.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    if (circle.profileImageUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = circle.profileImageUrl,
+                            contentDescription = "${circle.name} profile picture",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    } else {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.Groups,
+                                contentDescription = null,
+                                modifier = Modifier.size(32.dp),
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        circle.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        circle.comment.ifBlank { "No circle note" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -2706,36 +2875,248 @@ private fun CircleMonthCard(circle: CircleData, initiallyExpanded: Boolean) {
 }
 
 @Composable
-private fun CirclePageCard(title: String, text: String) {
-    var expanded by remember(title, text) { mutableStateOf(false) }
+private fun CirclePageCard(page: CirclePageInfo, circle: CircleData) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = when (page.type) {
+                CirclePageType.FESTA -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
+                CirclePageType.CHALLENGE_RANKING -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                else -> MaterialTheme.colorScheme.surfaceVariant
+            },
+        ),
         shape = RoundedCornerShape(16.dp),
     ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(title, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                Text(
-                    if (expanded) "Collapse" else "Show page text",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(page.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+            val description = when (page.type) {
+                CirclePageType.PROFILE -> "The current circle profile shown on DX NET"
+                CirclePageType.INVITE_ACCEPT -> "Pending circle invitations and join requests"
+                CirclePageType.FESTA -> "Current Circle Festa status and progress"
+                CirclePageType.CHALLENGE_RANKING -> "Weekly Circle Challenge member leaderboard"
+                CirclePageType.POINT_REWARD -> "Monthly rewards earned with circle points"
+                CirclePageType.RANKING -> "Circle point leaderboard"
+                CirclePageType.MEMBER -> "Members and their circle point contributions"
+                CirclePageType.OTHER -> ""
             }
-            if (expanded) {
+            if (description.isNotBlank()) {
                 Text(
-                    text,
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    description,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            when (page.type) {
+                CirclePageType.PROFILE -> CircleProfileVisual(circle)
+                CirclePageType.POINT_REWARD -> CircleRewardPage(circle)
+                CirclePageType.MEMBER -> CircleMemberPage(circle)
+                else -> CircleStructuredPage(page)
+            }
         }
+    }
+}
+
+@Composable
+private fun CircleRewardPage(circle: CircleData) {
+    if (circle.rewards.isEmpty()) {
+        CirclePageEmptyState("No point rewards were listed by DX NET.")
+        return
+    }
+    circle.rewards.sortedBy { reward -> reward.pointsRequired }.forEach { reward ->
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = if (reward.earned) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
+            shape = RoundedCornerShape(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.padding(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (reward.imageUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = reward.imageUrl,
+                        contentDescription = reward.name,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Fit,
+                    )
+                    Spacer(Modifier.width(9.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(reward.name, fontWeight = FontWeight.Bold)
+                    Text(
+                        "${formatCount(reward.pointsRequired)} PT",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (reward.earned) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = "Received",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CircleMemberPage(circle: CircleData) {
+    if (circle.members.isEmpty()) {
+        CirclePageEmptyState("DX NET did not list any circle members.")
+        return
+    }
+    circle.members.sortedByDescending { member -> member.points }.forEachIndexed { index, member ->
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = if (member.isCurrentUser) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
+            shape = RoundedCornerShape(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.padding(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "#${index + 1}",
+                    modifier = Modifier.width(34.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Black,
+                )
+                if (member.avatarUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = member.avatarUrl,
+                        contentDescription = member.name,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                    Spacer(Modifier.width(9.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        member.name + if (member.isCurrentUser) " (you)" else "",
+                        fontWeight = FontWeight.Bold,
+                    )
+                    if (member.role.isNotBlank()) {
+                        Text(
+                            member.role,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Text(
+                    "${formatCount(member.points)} PT",
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CircleStructuredPage(page: CirclePageInfo) {
+    val heroImage = page.imageUrls.firstOrNull { image ->
+        page.items.none { item -> item.imageUrl == image }
+    }
+    heroImage?.let { image ->
+        AsyncImage(
+            model = image,
+            contentDescription = page.title,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(120.dp)
+                .clip(RoundedCornerShape(10.dp)),
+            contentScale = ContentScale.Fit,
+        )
+    }
+    if (page.items.isEmpty()) {
+        CirclePageEmptyState(
+            when (page.type) {
+                CirclePageType.INVITE_ACCEPT -> "There are no pending circle invitations or join requests."
+                CirclePageType.FESTA -> "There is no active Circle Festa information."
+                CirclePageType.CHALLENGE_RANKING -> "No Circle Challenge ranking is available yet."
+                CirclePageType.RANKING -> "No circle ranking entries are available."
+                else -> "DX NET did not expose structured information for this section."
+            },
+        )
+        return
+    }
+    page.items.take(30).forEachIndexed { index, item ->
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.padding(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (
+                    page.type == CirclePageType.RANKING ||
+                    page.type == CirclePageType.CHALLENGE_RANKING
+                ) {
+                    Text(
+                        "#${index + 1}",
+                        modifier = Modifier.width(34.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+                if (item.imageUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = item.imageUrl,
+                        contentDescription = item.label,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Fit,
+                    )
+                    Spacer(Modifier.width(9.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(item.label, fontWeight = FontWeight.Bold)
+                    if (item.value.isNotBlank()) {
+                        Text(
+                            item.value,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CirclePageEmptyState(message: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+        shape = RoundedCornerShape(10.dp),
+    ) {
+        Text(
+            message,
+            modifier = Modifier.padding(12.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -3262,7 +3643,7 @@ private fun ProfileCardCloseUpDialog(
     }
 }
 
-private const val PROFILE_CARD_ASPECT_RATIO = 2.3f
+private const val PROFILE_CARD_ASPECT_RATIO = 450f / 132f
 
 @Composable
 private fun DxNetProfileCard(
@@ -3274,182 +3655,142 @@ private fun DxNetProfileCard(
             .fillMaxWidth()
             .aspectRatio(PROFILE_CARD_ASPECT_RATIO),
     ) {
-        val scale = (maxWidth.value / 400f).coerceIn(0.78f, 1.8f)
-        val nameFontSize = 12.sp * scale
-        val starFontSize = 13.sp * scale
+        val scale = (maxWidth.value / 450f).coerceIn(0.68f, 1.8f)
+        val nameFontSize = 16.sp * scale
+        val starFontSize = 14.sp * scale
         Surface(
             modifier = Modifier.fillMaxSize(),
-            shape = RoundedCornerShape(8.dp * scale),
-            color = Color(0xFFC5ECFA),
+            shape = RoundedCornerShape(6.dp * scale),
+            color = Color(0xFFD9F3FC),
+            border = BorderStroke(1.dp, Color(0xFF8ED0EA)),
             shadowElevation = 2.dp,
         ) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(5.dp * scale),
+                    .padding(10.dp * scale),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    color = Color(0xFFFCFEFF),
-                    shape = RoundedCornerShape(5.dp * scale),
-                    border = BorderStroke(1.dp, Color(0xFFC7D1D6)),
-                    shadowElevation = 1.dp,
+                    modifier = Modifier.size(112.dp * scale),
+                    shape = RoundedCornerShape(4.dp * scale),
+                    color = Color(0xFFE5F6FD),
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(7.dp * scale),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        DxNetAvatar(
-                            profile = profile,
-                            modifier = Modifier.size(84.dp * scale),
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.AccountCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(72.dp * scale),
+                            tint = Color(0xFF178AB6),
                         )
-                        Spacer(Modifier.width(8.dp * scale))
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            verticalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            DxNetTitleBadge(
-                                title = profile.title.ifBlank { "DX NET profile" },
-                                imageUrl = profile.titleBackgroundUrl,
-                                scale = scale,
+                        if (profile.avatarUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = profile.avatarUrl,
+                                contentDescription = "${profile.name}'s DX NET icon",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit,
                             )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(25.dp * scale),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Surface(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(),
-                                    shape = RoundedCornerShape(4.dp * scale),
-                                    color = Color.White,
-                                    border = BorderStroke(1.dp, Color(0xFFDEDEDE)),
-                                    shadowElevation = 1.dp,
-                                ) {
-                                    Box(
-                                        modifier = Modifier.padding(horizontal = 7.dp * scale),
-                                        contentAlignment = Alignment.CenterStart,
-                                    ) {
-                                        Text(
-                                            profile.name,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            fontSize = nameFontSize,
-                                            lineHeight = nameFontSize,
-                                            fontFamily = FontFamily.SansSerif,
-                                            fontWeight = FontWeight.Normal,
-                                            letterSpacing = 0.sp,
-                                            color = Color(0xFF111111),
-                                        )
-                                    }
-                                }
-                                Spacer(Modifier.width(6.dp * scale))
-                                DxRatingBadge(
-                                    rating = profile.officialRating,
-                                    imageUrl = profile.ratingBaseUrl,
-                                    scale = scale,
-                                )
-                            }
-                            Canvas(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(1.dp),
-                            ) {
-                                drawLine(
-                                    color = Color(0xFFB7B7B7),
-                                    start = androidx.compose.ui.geometry.Offset.Zero,
-                                    end = androidx.compose.ui.geometry.Offset(size.width, 0f),
-                                    strokeWidth = 1.dp.toPx(),
-                                    cap = StrokeCap.Round,
-                                    pathEffect = PathEffect.dashPathEffect(
-                                        floatArrayOf(1.dp.toPx(), 3.dp.toPx()),
-                                    ),
-                                )
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(25.dp * scale),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                profile.courseRankUrl.takeIf(String::isNotBlank)?.let {
-                                    DxNetRankImage(
-                                        url = it,
-                                        description = "Course rank",
-                                        modifier = Modifier.size(
-                                            width = 63.dp * scale,
-                                            height = 25.dp * scale,
-                                        ),
-                                    )
-                                }
-                                profile.classRankUrl.takeIf(String::isNotBlank)?.let {
-                                    Spacer(Modifier.width(7.dp * scale))
-                                    DxNetRankImage(
-                                        url = it,
-                                        description = "Class rank",
-                                        modifier = Modifier.size(
-                                            width = 45.dp * scale,
-                                            height = 25.dp * scale,
-                                        ),
-                                    )
-                                }
-                                Spacer(Modifier.width(10.dp * scale))
-                                profile.starCount?.let { stars ->
-                                    AsyncImage(
-                                        model = profile.starIconUrl,
-                                        contentDescription = "DX star",
-                                        modifier = Modifier.size(
-                                            width = 23.dp * scale,
-                                            height = 25.dp * scale,
-                                        ),
-                                        contentScale = ContentScale.Fit,
-                                    )
-                                    Spacer(Modifier.width(2.dp * scale))
-                                    Text(
-                                        "×$stars",
-                                        maxLines = 1,
-                                        fontSize = starFontSize,
-                                        lineHeight = starFontSize,
-                                        fontFamily = FontFamily.SansSerif,
-                                        fontWeight = FontWeight.Normal,
-                                        letterSpacing = 0.sp,
-                                        color = Color(0xFF202020),
-                                    )
-                                }
-                            }
                         }
                     }
                 }
+                Spacer(Modifier.width(10.dp * scale))
                 Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 7.dp * scale, vertical = 2.dp * scale),
-                    horizontalAlignment = Alignment.End,
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text(
-                        profile.currentVersionPlayCount?.let { count ->
-                            "play count of current version : ${formatCount(count)}"
-                        } ?: " ",
-                        fontSize = 8.sp * scale,
-                        lineHeight = 10.sp * scale,
-                        color = Color(0xFF17455A),
+                    DxNetTitleBadge(
+                        title = profile.title.ifBlank { "DX NET profile" },
+                        imageUrl = profile.titleBackgroundUrl,
+                        scale = scale,
                     )
-                    Text(
-                        profile.totalPlayCount?.let { count ->
-                            "maimaiDX total play count : ${formatCount(count)}"
-                        } ?: " ",
-                        fontSize = 8.sp * scale,
-                        lineHeight = 10.sp * scale,
-                        color = Color(0xFF17455A),
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(30.dp * scale),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            shape = RoundedCornerShape(3.dp * scale),
+                            color = Color.White,
+                            border = BorderStroke(1.dp, Color(0xFFB8C3C9)),
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 8.dp * scale),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                Text(
+                                    profile.name,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontSize = nameFontSize,
+                                    lineHeight = nameFontSize,
+                                    fontFamily = FontFamily.SansSerif,
+                                    fontWeight = FontWeight.Normal,
+                                    letterSpacing = 0.sp,
+                                    color = Color(0xFF111111),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(7.dp * scale))
+                        DxRatingBadge(
+                            rating = profile.officialRating,
+                            imageUrl = profile.ratingBaseUrl,
+                            scale = scale,
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(35.dp * scale),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        profile.courseRankUrl.takeIf(String::isNotBlank)?.let {
+                            DxNetRankImage(
+                                url = it,
+                                description = "Course rank",
+                                modifier = Modifier.size(
+                                    width = 90.dp * scale,
+                                    height = 35.dp * scale,
+                                ),
+                            )
+                        }
+                        profile.classRankUrl.takeIf(String::isNotBlank)?.let {
+                            Spacer(Modifier.width(10.dp * scale))
+                            DxNetRankImage(
+                                url = it,
+                                description = "Class rank",
+                                modifier = Modifier.size(
+                                    width = 63.dp * scale,
+                                    height = 35.dp * scale,
+                                ),
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp * scale))
+                        profile.starCount?.let { stars ->
+                            AsyncImage(
+                                model = profile.starIconUrl,
+                                contentDescription = "DX star",
+                                modifier = Modifier.size(25.dp * scale),
+                                contentScale = ContentScale.Fit,
+                            )
+                            Spacer(Modifier.width(3.dp * scale))
+                            Text(
+                                "×$stars",
+                                maxLines = 1,
+                                fontSize = starFontSize,
+                                lineHeight = starFontSize,
+                                fontFamily = FontFamily.SansSerif,
+                                fontWeight = FontWeight.Normal,
+                                letterSpacing = 0.sp,
+                                color = Color(0xFF202020),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -3457,12 +3798,37 @@ private fun DxNetProfileCard(
 }
 
 @Composable
+private fun DxNetPlayCounts(profile: PlayerProfile) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 5.dp, vertical = 2.dp),
+        horizontalAlignment = Alignment.End,
+    ) {
+        profile.currentVersionPlayCount?.let { count ->
+            Text(
+                "play count of current version : ${formatCount(count)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        profile.totalPlayCount?.let { count ->
+            Text(
+                "maimaiDX total play count : ${formatCount(count)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
 private fun DxNetTitleBadge(title: String, imageUrl: String, scale: Float) {
-    val fontSize = 11.sp * scale
+    val fontSize = 13.sp * scale
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(21.dp * scale),
+            .height(24.dp * scale),
         contentAlignment = Alignment.Center,
     ) {
         AsyncImage(
@@ -3531,11 +3897,11 @@ private fun DxNetAvatar(profile: PlayerProfile, modifier: Modifier = Modifier) {
 
 @Composable
 private fun DxRatingBadge(rating: Int, imageUrl: String, scale: Float) {
-    val fontSize = 13.sp * scale
+    val fontSize = 16.sp * scale
     Box(
         modifier = Modifier
-            .width(73.dp * scale)
-            .height(21.dp * scale),
+            .width(92.dp * scale)
+            .height(28.dp * scale),
         contentAlignment = Alignment.CenterEnd,
     ) {
         AsyncImage(
@@ -3546,7 +3912,7 @@ private fun DxRatingBadge(rating: Int, imageUrl: String, scale: Float) {
         )
         Text(
             rating.toString(),
-            modifier = Modifier.padding(end = 6.dp * scale),
+            modifier = Modifier.padding(end = 8.dp * scale),
             color = Color.White,
             fontFamily = FontFamily.SansSerif,
             fontWeight = FontWeight.Bold,

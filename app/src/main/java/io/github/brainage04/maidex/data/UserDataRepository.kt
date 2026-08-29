@@ -128,7 +128,6 @@ class UserDataRepository(context: Context) {
     }
 
     fun loadTrackingSettings(): TrackingSettings = TrackingSettings(
-        syncHour = preferences.getInt("tracking_hour", 7).coerceIn(0, 23),
         lastAttemptAt = preferences.getLong("tracking_last_attempt_at", 0L),
         lastSuccessAt = preferences.getLong("tracking_last_success_at", 0L),
         lastError = preferences.getString("tracking_last_error", "").orEmpty(),
@@ -195,9 +194,6 @@ class UserDataRepository(context: Context) {
         )
     }
 
-    fun setTrackingHour(hour: Int) {
-        preferences.edit().putInt("tracking_hour", hour.coerceIn(0, 23)).apply()
-    }
 
     fun recordTrackingAttempt(at: Long = System.currentTimeMillis()) {
         preferences.edit().putLong("tracking_last_attempt_at", at).apply()
@@ -389,6 +385,7 @@ private fun encodeCircle(circle: CircleData): String = JSONObject().apply {
     put("updatedAt", circle.updatedAt)
     put("characterUrl", circle.characterUrl)
     put("backgroundUrl", circle.backgroundUrl)
+    put("profileImageUrl", circle.profileImageUrl)
     put("members", JSONArray().apply {
         circle.members.forEach { member ->
             put(JSONObject().apply {
@@ -424,6 +421,17 @@ private fun encodeCircle(circle: CircleData): String = JSONObject().apply {
             put(JSONObject().apply {
                 put("title", page.title)
                 put("text", page.text)
+                put("type", page.type.name)
+                put("items", JSONArray().apply {
+                    page.items.forEach { item ->
+                        put(JSONObject().apply {
+                            put("label", item.label)
+                            put("value", item.value)
+                            put("imageUrl", item.imageUrl)
+                        })
+                    }
+                })
+                put("imageUrls", JSONArray(page.imageUrls))
             })
         }
     })
@@ -449,6 +457,7 @@ private fun decodeCircle(value: String): CircleData {
         updatedAt = root.optString("updatedAt"),
         characterUrl = root.optString("characterUrl"),
         backgroundUrl = root.optString("backgroundUrl"),
+        profileImageUrl = root.optString("profileImageUrl"),
         members = root.optJSONArray("members").objects().map { member ->
             CircleMember(
                 key = member.optString("key"),
@@ -474,13 +483,41 @@ private fun decodeCircle(value: String): CircleData {
             )
         },
         pages = root.optJSONArray("pages").objects().map { page ->
+            val title = page.optString("title")
             CirclePageInfo(
-                title = page.optString("title"),
+                title = title,
                 text = page.optString("text"),
+                type = runCatching {
+                    CirclePageType.valueOf(page.optString("type"))
+                }.getOrElse {
+                    circlePageTypeFromLegacyTitle(title)
+                },
+                items = page.optJSONArray("items").objects().map { item ->
+                    CirclePageItem(
+                        label = item.optString("label"),
+                        value = item.optString("value"),
+                        imageUrl = item.optString("imageUrl"),
+                    )
+                },
+                imageUrls = page.optJSONArray("imageUrls").strings(),
             )
         },
         importedAt = root.optLong("importedAt"),
     )
+}
+
+private fun circlePageTypeFromLegacyTitle(title: String): CirclePageType {
+    val key = title.replace(Regex("""[^a-z]""", RegexOption.IGNORE_CASE), "").lowercase()
+    return when {
+        "circlechallenge" in key && "ranking" in key -> CirclePageType.CHALLENGE_RANKING
+        "inviteaccept" in key || "invitation" in key -> CirclePageType.INVITE_ACCEPT
+        "pointreward" in key -> CirclePageType.POINT_REWARD
+        "festa" in key -> CirclePageType.FESTA
+        "profile" in key -> CirclePageType.PROFILE
+        "member" in key -> CirclePageType.MEMBER
+        "ranking" in key -> CirclePageType.RANKING
+        else -> CirclePageType.OTHER
+    }
 }
 
 private fun JSONObject.optionalInt(key: String): Int? =

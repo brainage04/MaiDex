@@ -25,7 +25,28 @@ class BaselineProfileGenerator {
         startActivityAndWait()
         assertTrue(
             "Catalog did not finish loading",
-            device.wait(Until.hasObject(By.text("Find a chart constant")), 10_000),
+            device.wait(Until.hasObject(By.textContains("songs")), 10_000),
+        )
+        device.findObject(By.desc("Open navigation menu")).click()
+        assertTrue(
+            "Navigation drawer did not open",
+            device.wait(Until.hasObject(By.text("DX NET account")), 5_000),
+        )
+        device.findObject(By.text("DX NET account")).click()
+        assertTrue(
+            "Account dialog did not open",
+            device.wait(Until.hasObject(By.text("maimai DX NET")), 5_000),
+        )
+        device.pressBack()
+        device.findObject(By.desc("Open navigation menu")).click()
+        assertTrue(
+            "Navigation drawer did not reopen",
+            device.wait(Until.hasObject(By.text("Dan courses")), 5_000),
+        )
+        device.findObject(By.text("Dan courses")).click()
+        assertTrue(
+            "Dan courses did not open",
+            device.wait(Until.hasObject(By.text("Dan type")), 5_000),
         )
     }
 }

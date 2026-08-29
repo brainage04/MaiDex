@@ -24,6 +24,12 @@ data class Regions(
         if (usa) add("usa")
         if (china) add("cn")
     }
+
+    fun matchesAny(selected: Set<String>): Boolean =
+        (jp && "jp" in selected) ||
+            (international && "intl" in selected) ||
+            (usa && "usa" in selected) ||
+            (china && "cn" in selected)
 }
 enum class UnlockGuideSection(val label: String) {
     CHIHOS("Chihos"),
@@ -99,7 +105,11 @@ data class SongChart(
             noteDesigner.orEmpty(),
             noteDesignerRomanized,
         ).joinToString(" "),
-    )
+    ),
+    val artistSearchText: String = normalizeSearch("$artist $artistRomanized"),
+    val designerSearchText: String =
+        normalizeSearch("${noteDesigner.orEmpty()} $noteDesignerRomanized"),
+    val titleSortKey: String = title.lowercase(Locale.ROOT),
 ) {
 
     val displayType: String
@@ -204,6 +214,7 @@ data class CatalogInfo(
     val songCount: Int,
     val chartCount: Int,
     val sourceUrl: String,
+    val lastCheckedAt: Long = 0L,
 )
 
 private fun Char.isIgnoredInSearch(): Boolean =

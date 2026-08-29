@@ -1,6 +1,7 @@
 package io.github.brainage04.maidex.network
 
 import io.github.brainage04.maidex.data.AccountRegion
+import io.github.brainage04.maidex.data.CirclePageType
 import org.jsoup.Jsoup
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -122,8 +123,9 @@ class MaimaiDxClientTest {
         val document = Jsoup.parse(
             """
             <main class="main_wrapper">
-              <img class="title" src="/maimai-mobile/img/title_circle.png">
+              <img class="title" src="/maimai-mobile/img/title_circle_profile.png">
               <section class="circle_profile">
+                <img class="circle_icon" src="/maimai-mobile/img/CircleIcon/test.png">
                 <div class="circle_name_block">Test Circle</div>
                 <div class="circle_code_block">Circle code: ABCDEFGH</div>
                 <div class="circle_leader">Leader: B r a i n a g e</div>
@@ -186,6 +188,44 @@ class MaimaiDxClientTest {
         assertEquals(listOf(true, false), circle.rewards.map { it.earned })
         assertEquals("International", circle.information.single { it.label == "Region" }.value)
         assertEquals(true, circle.pages.single().text.contains("Beginners welcome"))
+        assertEquals(
+            "https://maimaidx-eng.com/maimai-mobile/img/CircleIcon/test.png",
+            circle.profileImageUrl,
+        )
+        assertEquals(CirclePageType.PROFILE, circle.pages.single().type)
+        assertEquals("Circle profile", circle.pages.single().title)
+    }
+
+    @Test
+    fun `circle challenge page has a human label and structured ranking entries`() {
+        val profile = Jsoup.parse(
+            """
+            <main class="main_wrapper">
+              <img class="title" src="/maimai-mobile/img/title_circle_profile.png">
+              <div class="circle_name_block">Test Circle</div>
+            </main>
+            """.trimIndent(),
+            "https://maimaidx-eng.com/maimai-mobile/circle/profile/",
+        )
+        val challenge = Jsoup.parse(
+            """
+            <main class="main_wrapper">
+              <img class="title" src="/maimai-mobile/img/title_circle_circlechallenge_ranking.png">
+              <div class="ranking_block">
+                <strong>Player One</strong>
+                <span>100.5000%</span>
+              </div>
+            </main>
+            """.trimIndent(),
+            "https://maimaidx-eng.com/maimai-mobile/circle/circleChallenge/ranking/",
+        )
+
+        val circle = extractCircleData(listOf(profile, challenge), "Player One", importedAt = 123L)!!
+        val page = circle.pages.single { it.type == CirclePageType.CHALLENGE_RANKING }
+
+        assertEquals("Circle Challenge ranking", page.title)
+        assertEquals("Player One", page.items.single().label)
+        assertEquals("100.5000%", page.items.single().value)
     }
 
     @Test

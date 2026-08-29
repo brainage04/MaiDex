@@ -143,9 +143,29 @@ data class CircleInfoItem(
     val value: String,
 )
 
+enum class CirclePageType {
+    PROFILE,
+    INVITE_ACCEPT,
+    FESTA,
+    CHALLENGE_RANKING,
+    POINT_REWARD,
+    RANKING,
+    MEMBER,
+    OTHER,
+}
+
+data class CirclePageItem(
+    val label: String,
+    val value: String = "",
+    val imageUrl: String = "",
+)
+
 data class CirclePageInfo(
     val title: String,
     val text: String,
+    val type: CirclePageType = CirclePageType.OTHER,
+    val items: List<CirclePageItem> = emptyList(),
+    val imageUrls: List<String> = emptyList(),
 )
 
 data class CircleData(
@@ -165,6 +185,7 @@ data class CircleData(
     val updatedAt: String = "",
     val characterUrl: String = "",
     val backgroundUrl: String = "",
+    val profileImageUrl: String = "",
     val members: List<CircleMember> = emptyList(),
     val rewards: List<CircleReward> = emptyList(),
     val information: List<CircleInfoItem> = emptyList(),
@@ -188,7 +209,6 @@ data class PlayCountSnapshot(
 )
 
 data class TrackingSettings(
-    val syncHour: Int = 7,
     val lastAttemptAt: Long = 0L,
     val lastSuccessAt: Long = 0L,
     val lastError: String = "",

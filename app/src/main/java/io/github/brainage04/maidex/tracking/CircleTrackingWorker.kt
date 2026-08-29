@@ -5,16 +5,14 @@ import android.webkit.CookieManager
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
-import androidx.work.ExistingWorkPolicy
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import io.github.brainage04.maidex.data.UserDataRepository
-import io.github.brainage04.maidex.network.MaimaiDxClient
 import io.github.brainage04.maidex.network.AuthenticationRequiredException
-import java.time.Duration
-import java.time.ZonedDateTime
+import io.github.brainage04.maidex.network.MaimaiDxClient
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,10 +25,8 @@ class CircleTrackingWorker(
         val repository = UserDataRepository(applicationContext)
         val profile = withContext(Dispatchers.IO) { repository.loadProfile() }
             ?: return Result.success()
-        val settings = repository.loadTrackingSettings()
         repository.recordTrackingAttempt()
-        var retrying = false
-        val outcome = try {
+        return try {
             val cookieManager = withContext(Dispatchers.Main) { CookieManager.getInstance() }
             val snapshot = MaimaiDxClient(cookieManager).syncAccount(profile.region)
             withContext(Dispatchers.IO) {
@@ -42,62 +38,43 @@ class CircleTrackingWorker(
             repository.recordTrackingFailure(
                 failure.message ?: "Unable to refresh DX NET tracking data",
             )
-            retrying = shouldRetryDailySync(failure, runAttemptCount)
-            if (retrying) Result.retry() else Result.success()
+            if (shouldRetryHourlySync(failure, runAttemptCount)) Result.retry() else Result.success()
         }
-        if (!retrying) {
-            CircleTrackingScheduler.scheduleNext(applicationContext, settings.syncHour)
-        }
-        return outcome
     }
 }
 
 object CircleTrackingScheduler {
-    private const val WORK_NAME = "daily-dx-net-tracking"
+    private const val WORK_NAME = "hourly-dx-net-tracking"
+    private const val LEGACY_WORK_NAME = "daily-dx-net-tracking"
 
-    fun schedule(context: Context, hour: Int) {
-        WorkManager.getInstance(context).enqueueUniqueWork(
+    fun schedule(context: Context) {
+        val workManager = WorkManager.getInstance(context)
+        workManager.cancelUniqueWork(LEGACY_WORK_NAME)
+        workManager.enqueueUniquePeriodicWork(
             WORK_NAME,
-            ExistingWorkPolicy.REPLACE,
-            request(hour),
-        )
-    }
-
-    internal fun scheduleNext(context: Context, hour: Int) {
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            WORK_NAME,
-            ExistingWorkPolicy.APPEND_OR_REPLACE,
-            request(hour),
+            ExistingPeriodicWorkPolicy.UPDATE,
+            PeriodicWorkRequestBuilder<CircleTrackingWorker>(
+                TRACKING_REPEAT_INTERVAL_HOURS,
+                TimeUnit.HOURS,
+            )
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build(),
+                )
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
+                .build(),
         )
     }
 
     fun cancel(context: Context) {
-        WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+        val workManager = WorkManager.getInstance(context)
+        workManager.cancelUniqueWork(WORK_NAME)
+        workManager.cancelUniqueWork(LEGACY_WORK_NAME)
     }
-
-    private fun request(hour: Int) = OneTimeWorkRequestBuilder<CircleTrackingWorker>()
-        .setConstraints(
-            Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
-                .build(),
-        )
-        .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
-        .setInitialDelay(
-            nextTrackingDelayMillis(ZonedDateTime.now(), hour.coerceIn(0, 23)),
-            TimeUnit.MILLISECONDS,
-        )
-        .build()
 }
 
-internal fun shouldRetryDailySync(failure: Exception, runAttemptCount: Int): Boolean =
+internal const val TRACKING_REPEAT_INTERVAL_HOURS = 1L
+
+internal fun shouldRetryHourlySync(failure: Exception, runAttemptCount: Int): Boolean =
     failure !is AuthenticationRequiredException && runAttemptCount < 2
-
-internal fun nextTrackingDelayMillis(now: ZonedDateTime, hour: Int): Long {
-    var next = now
-        .withHour(hour.coerceIn(0, 23))
-        .withMinute(0)
-        .withSecond(0)
-        .withNano(0)
-    if (!next.isAfter(now)) next = next.plusDays(1)
-    return Duration.between(now, next).toMillis()
-}

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import io.github.brainage04.maidex.data.AccountRegion
 import io.github.brainage04.maidex.data.CatalogInfo
 import io.github.brainage04.maidex.data.CatalogRepository
+import io.github.brainage04.maidex.data.CatalogUpdateScheduler
 import io.github.brainage04.maidex.data.ChartFilters
 import io.github.brainage04.maidex.data.CircleDailySnapshot
 import io.github.brainage04.maidex.data.CircleData
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -75,6 +77,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, PlayerData())
 
+    private var ratingCharts: List<SongChart>? = null
+    private var ratingScores: Map<String, UserScore>? = null
+    private var cachedRating = 0
+
+    private fun calculatedRating(
+        charts: List<SongChart>,
+        currentScores: Map<String, UserScore>,
+        newVersions: Set<String>,
+    ): Int {
+        if (ratingCharts !== charts || ratingScores !== currentScores) {
+            cachedRating = RatingCalculator.totalRating(charts, currentScores, newVersions)
+            ratingCharts = charts
+            ratingScores = currentScores
+        }
+        return cachedRating
+    }
+
     val uiState: StateFlow<CatalogUiState> = combine(snapshot, filters, sorting, error, playerData) {
             loaded,
             activeFilters,
@@ -92,7 +111,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 activeSorting.order,
                 player.scores,
             )
-            val newVersions = loaded.options.versions.take(2).toSet()
+            val newVersions = loaded.newVersions
             CatalogUiState(
                 charts = visible,
                 allCharts = loaded.charts,
@@ -105,7 +124,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 scores = player.scores,
                 playDetails = player.playDetails,
                 profile = player.profile,
-                calculatedRating = RatingCalculator.totalRating(loaded.charts, player.scores, newVersions),
+                calculatedRating = calculatedRating(loaded.charts, player.scores, newVersions),
                 newVersions = newVersions,
                 importStatus = player.importStatus,
                 circleHistory = player.tracking.circleHistory,
@@ -115,7 +134,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 error = failure,
             )
         }
-    }.stateIn(
+    }.flowOn(Dispatchers.Default).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = CatalogUiState(isLoading = true),
@@ -130,10 +149,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         charts = loaded.charts,
                         options = loaded.options,
                         info = loaded.info,
+                        newVersions = loaded.options.versions.take(2).toSet(),
                     )
                 }
             }.onSuccess { loaded ->
                 snapshot.value = loaded
+                CatalogUpdateScheduler.schedule(application)
             }
                 .onFailure { failure -> error.value = failure.message ?: "Unable to load catalog" }
         }
@@ -144,8 +165,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 profile.value = userRepository.loadProfile()
             }
             reloadTrackingData()
-            profile.value?.let {
-                CircleTrackingScheduler.schedule(application, trackingSettings.value.syncHour)
+            if (profile.value != null) {
+                CircleTrackingScheduler.schedule(application)
             }
         }
     }
@@ -192,10 +213,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 playDetails.value = withContext(Dispatchers.IO) { userRepository.loadPlayDetails() }
                 profile.value = result.profile
                 reloadTrackingData()
-                CircleTrackingScheduler.schedule(
-                    getApplication(),
-                    trackingSettings.value.syncHour,
-                )
+                CircleTrackingScheduler.schedule(getApplication())
                 importStatus.value = ImportStatus.Success(
                     imported = result.scores.size,
                     recentDetails = result.playDetails.size,
@@ -224,14 +242,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setTrackingHour(hour: Int) {
-        val safeHour = hour.coerceIn(0, 23)
-        userRepository.setTrackingHour(safeHour)
-        trackingSettings.value = userRepository.loadTrackingSettings()
-        if (profile.value != null) {
-            CircleTrackingScheduler.schedule(getApplication(), safeHour)
-        }
-    }
 
     fun refreshTrackingData() {
         viewModelScope.launch { reloadTrackingData() }
@@ -284,6 +294,7 @@ private data class LoadedCatalog(
     val charts: List<SongChart>,
     val options: FilterOptions,
     val info: CatalogInfo,
+    val newVersions: Set<String>,
 )
 private data class Sorting(
     val field: ChartSort = ChartSort.LEVEL,
@@ -324,16 +335,14 @@ internal fun filterAndSort(
     fun score(chart: SongChart) = scores[chart.chartKey]
     val filtered = charts.asSequence().filter { chart ->
         (query.isEmpty() || chart.searchableText.contains(query)) &&
-            (artist.isEmpty() || normalizeSearch("${chart.artist} ${chart.artistRomanized}").contains(artist)) &&
-            (designer.isEmpty() || normalizeSearch(
-                "${chart.noteDesigner.orEmpty()} ${chart.noteDesignerRomanized}",
-            ).contains(designer)) &&
+            (artist.isEmpty() || chart.artistSearchText.contains(artist)) &&
+            (designer.isEmpty() || chart.designerSearchText.contains(designer)) &&
             (filters.categories.isEmpty() || chart.category in filters.categories) &&
             (filters.difficulties.isEmpty() || chart.difficulty in filters.difficulties) &&
             (filters.versions.isEmpty() || chart.chartVersion in filters.versions) &&
             (filters.types.isEmpty() || chart.type in filters.types) &&
             (filters.showUtage || chart.type != "utage") &&
-            (filters.regions.isEmpty() || chart.regions.codes().any(filters.regions::contains)) &&
+            (filters.regions.isEmpty() || chart.regions.matchesAny(filters.regions)) &&
             (filters.minLevel == null || (chart.effectiveLevel ?: Double.NEGATIVE_INFINITY) >= filters.minLevel) &&
             (filters.maxLevel == null || (chart.effectiveLevel ?: Double.POSITIVE_INFINITY) <= filters.maxLevel) &&
             (filters.minBpm == null || (chart.bpm ?: Int.MIN_VALUE) >= filters.minBpm) &&
@@ -350,68 +359,75 @@ internal fun filterAndSort(
     }.toList()
 
     val ascending = sortOrder == SortOrder.ASCENDING
+    val ratingValues = if (sort == ChartSort.RATING) {
+        buildMap {
+            filtered.forEach { chart ->
+                scores[chart.chartKey]
+                    ?.let { current -> RatingCalculator.chartRating(chart, current) }
+                    ?.let { rating -> put(chart.chartKey, rating) }
+            }
+        }
+    } else {
+        emptyMap()
+    }
     val comparator: Comparator<SongChart> = when (sort) {
         ChartSort.LEVEL -> if (ascending) {
             compareBy<SongChart> { it.effectiveLevel ?: Double.POSITIVE_INFINITY }
-                .thenBy { it.title.lowercase() }
+                .thenBy { it.titleSortKey }
         } else {
             compareByDescending<SongChart> { it.effectiveLevel ?: Double.NEGATIVE_INFINITY }
-                .thenBy { it.title.lowercase() }
+                .thenBy { it.titleSortKey }
         }
         ChartSort.TITLE -> if (ascending) {
-            compareBy<SongChart> { it.title.lowercase() }
+            compareBy<SongChart> { it.titleSortKey }
                 .thenBy { it.effectiveLevel ?: Double.POSITIVE_INFINITY }
         } else {
-            compareByDescending<SongChart> { it.title.lowercase() }
+            compareByDescending<SongChart> { it.titleSortKey }
                 .thenByDescending { it.effectiveLevel ?: Double.NEGATIVE_INFINITY }
         }
         ChartSort.RATING -> if (ascending) {
-            compareBy<SongChart> {
-                scores[it.chartKey]?.let { current -> RatingCalculator.chartRating(it, current) }
-                    ?: Int.MAX_VALUE
-            }.thenBy { it.title.lowercase() }
+            compareBy<SongChart> { ratingValues[it.chartKey] ?: Int.MAX_VALUE }
+                .thenBy { it.titleSortKey }
         } else {
-            compareByDescending<SongChart> {
-                scores[it.chartKey]?.let { current -> RatingCalculator.chartRating(it, current) }
-                    ?: Int.MIN_VALUE
-            }.thenBy { it.title.lowercase() }
+            compareByDescending<SongChart> { ratingValues[it.chartKey] ?: Int.MIN_VALUE }
+                .thenBy { it.titleSortKey }
         }
         ChartSort.ACHIEVEMENT -> if (ascending) {
             compareBy<SongChart> { scores[it.chartKey]?.achievement ?: Double.POSITIVE_INFINITY }
-                .thenBy { it.title.lowercase() }
+                .thenBy { it.titleSortKey }
         } else {
             compareByDescending<SongChart> { scores[it.chartKey]?.achievement ?: Double.NEGATIVE_INFINITY }
-                .thenBy { it.title.lowercase() }
+                .thenBy { it.titleSortKey }
         }
         ChartSort.GRADE -> if (ascending) {
             compareBy<SongChart> { scores[it.chartKey]?.grade?.threshold ?: Double.POSITIVE_INFINITY }
                 .thenBy { scores[it.chartKey]?.achievement ?: Double.POSITIVE_INFINITY }
-                .thenBy { it.title.lowercase() }
+                .thenBy { it.titleSortKey }
         } else {
             compareByDescending<SongChart> { scores[it.chartKey]?.grade?.threshold ?: Double.NEGATIVE_INFINITY }
                 .thenByDescending { scores[it.chartKey]?.achievement ?: Double.NEGATIVE_INFINITY }
-                .thenBy { it.title.lowercase() }
+                .thenBy { it.titleSortKey }
         }
         ChartSort.DX_SCORE -> if (ascending) {
             compareBy<SongChart> { scores[it.chartKey]?.dxScore ?: Int.MAX_VALUE }
-                .thenBy { it.title.lowercase() }
+                .thenBy { it.titleSortKey }
         } else {
             compareByDescending<SongChart> { scores[it.chartKey]?.dxScore ?: Int.MIN_VALUE }
-                .thenBy { it.title.lowercase() }
+                .thenBy { it.titleSortKey }
         }
         ChartSort.RELEASE -> if (ascending) {
             compareBy<SongChart> { it.releaseDate ?: "\uffff" }
-                .thenBy { it.title.lowercase() }
+                .thenBy { it.titleSortKey }
         } else {
             compareByDescending<SongChart> { it.releaseDate.orEmpty() }
-                .thenBy { it.title.lowercase() }
+                .thenBy { it.titleSortKey }
         }
         ChartSort.BPM -> if (ascending) {
             compareBy<SongChart> { it.bpm ?: Int.MAX_VALUE }
-                .thenBy { it.title.lowercase() }
+                .thenBy { it.titleSortKey }
         } else {
             compareByDescending<SongChart> { it.bpm ?: Int.MIN_VALUE }
-                .thenBy { it.title.lowercase() }
+                .thenBy { it.titleSortKey }
         }
     }
     return filtered.sortedWith(comparator)

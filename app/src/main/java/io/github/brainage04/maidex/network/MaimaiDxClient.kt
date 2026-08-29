@@ -6,6 +6,8 @@ import io.github.brainage04.maidex.data.CircleData
 import io.github.brainage04.maidex.data.CircleInfoItem
 import io.github.brainage04.maidex.data.CircleMember
 import io.github.brainage04.maidex.data.CirclePageInfo
+import io.github.brainage04.maidex.data.CirclePageItem
+import io.github.brainage04.maidex.data.CirclePageType
 import io.github.brainage04.maidex.data.CircleReward
 import io.github.brainage04.maidex.data.ComboMedal
 import io.github.brainage04.maidex.data.Grade
@@ -19,6 +21,11 @@ import io.github.brainage04.maidex.data.SyncMedal
 import io.github.brainage04.maidex.data.UserScore
 import io.github.brainage04.maidex.data.normalizeSearch
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -31,6 +38,7 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class MaimaiDxClient(
     private val cookieManager: CookieManager = CookieManager.getInstance(),
@@ -46,15 +54,7 @@ class MaimaiDxClient(
         val home = getDocument(region, "/maimai-mobile/home/")
         val baseProfile = extractPlayerProfile(home, region)
             ?: throw AuthenticationRequiredException("DX NET login expired; sign in again")
-        val profile = loadAccountProgress(region, baseProfile)
-        val circle = optionalSupplement {
-            extractCircleData(
-                documents = getCircleDocuments(region),
-                playerName = profile.name,
-                importedAt = profile.importedAt,
-            )
-        }
-        AccountSyncResult(profile, circle)
+        loadAccountSnapshot(region, baseProfile)
     }
 
     suspend fun import(
@@ -68,80 +68,21 @@ class MaimaiDxClient(
         val home = getDocument(region, "/maimai-mobile/home/")
         val baseProfile = extractPlayerProfile(home, region)
             ?: throw AuthenticationRequiredException("DX NET login expired; sign in again")
-        onProgress("Importing account progress…")
-        val profile = loadAccountProgress(region, baseProfile)
-        onProgress("Importing circle data…")
-        val circle = optionalSupplement {
-            extractCircleData(
-                documents = getCircleDocuments(region),
-                playerName = profile.name,
-                importedAt = profile.importedAt,
-            )
-        }
-
-        val scores = LinkedHashMap<String, UserScore>()
-        var unmatched = 0
-        val difficulties = listOf(
-            "basic" to "0",
-            "advanced" to "1",
-            "expert" to "2",
-            "master" to "3",
-            "remaster" to "4",
-            "utage" to "10",
-        )
-        difficulties.forEachIndexed { index, (difficulty, queryValue) ->
-            onProgress("Importing ${difficultyLabel(difficulty)} scores (${index + 1}/${difficulties.size})…")
-            val document = getDocument(
-                region,
-                "/maimai-mobile/record/musicGenre/search/?genre=99&diff=$queryValue",
-            )
-            document.select(".w_450.m_15.p_r.f_0").forEach { block ->
-                val raw = parseScoreBlock(block, difficulty) ?: return@forEach
-                val chart = lookup.find(raw.title, raw.type, raw.difficulty, raw.level)
-                if (chart == null) {
-                    unmatched += 1
-                } else {
-                    val score = UserScore(
-                        chartKey = chart.chartKey,
-                        achievement = raw.achievement,
-                        grade = Grade.fromAchievement(raw.achievement),
-                        comboMedal = raw.comboMedal,
-                        syncMedal = raw.syncMedal,
-                        dxScore = raw.dxScore,
-                        maxDxScore = raw.maxDxScore,
-                    )
-                    val existing = scores[chart.chartKey]
-                    if (existing == null || score.achievement >= existing.achievement) {
-                        scores[chart.chartKey] = score
-                    }
-                }
-            }
-            if (index < difficulties.lastIndex) Thread.sleep(250)
-        }
+        onProgress("Importing account and circle data…")
+        val account = loadAccountSnapshot(region, baseProfile)
+        val scoreImport = loadScores(region, lookup, onProgress)
 
         onProgress("Reading recent play history…")
         val recent = getDocument(region, "/maimai-mobile/record/")
         val summaries = parseRecentSummaries(recent, lookup).distinctBy(RecentSummary::chartKey)
-        val details = mutableListOf<PlayDetail>()
-        summaries.forEachIndexed { index, summary ->
-            onProgress("Importing recent details (${index + 1}/${summaries.size})…")
-            runCatching {
-                getDocument(
-                    region,
-                    "/maimai-mobile/record/playlogDetail/?idx=${java.net.URLEncoder.encode(summary.id, "UTF-8")}",
-                )
-            }.map { document -> parsePlayDetail(document, summary) }
-                .getOrNull()
-                ?.let(details::add)
-            if (index < summaries.lastIndex) Thread.sleep(150)
-        }
+        val details = loadRecentDetails(region, summaries, onProgress)
 
         ImportResult(
-            profile = profile,
-            scores = scores.values.toList(),
+            profile = account.profile,
+            scores = scoreImport.scores,
             playDetails = details,
-            unmatchedCharts = unmatched,
-            circle = circle,
+            unmatchedCharts = scoreImport.unmatched,
+            circle = account.circle,
         )
     }
 
@@ -151,23 +92,130 @@ class MaimaiDxClient(
         }
     }
 
-    private fun loadAccountProgress(region: AccountRegion, profile: PlayerProfile): PlayerProfile {
-        val mapDocument = optionalSupplement { getDocument(region, "/maimai-mobile/map/") }
-        val matchingDocument = optionalSupplement {
-            getDocument(region, "/maimai-mobile/friend/matching/")
+    private suspend fun loadAccountSnapshot(
+        region: AccountRegion,
+        baseProfile: PlayerProfile,
+    ): AccountSyncResult = coroutineScope {
+        val profile = async { loadAccountProgress(region, baseProfile) }
+        val circle = async {
+            optionalSupplement {
+                extractCircleData(
+                    documents = getCircleDocuments(region),
+                    playerName = baseProfile.name,
+                    importedAt = baseProfile.importedAt,
+                )
+            }
         }
-        return profile.copy(
-            completedChihoNames = mapDocument
+        AccountSyncResult(profile.await(), circle.await())
+    }
+
+    private suspend fun loadAccountProgress(
+        region: AccountRegion,
+        profile: PlayerProfile,
+    ): PlayerProfile = coroutineScope {
+        val mapDocument = async {
+            optionalSupplement { getDocument(region, "/maimai-mobile/map/") }
+        }
+        val matchingDocument = async {
+            optionalSupplement { getDocument(region, "/maimai-mobile/friend/matching/") }
+        }
+        profile.copy(
+            completedChihoNames = mapDocument.await()
                 ?.let(::extractCompletedChihoNames)
                 .orEmpty(),
-            friendClass = matchingDocument
+            friendClass = matchingDocument.await()
                 ?.let(::extractFriendClass)
                 .orEmpty()
                 .ifBlank { profile.friendClass },
         )
     }
 
-    private inline fun <T> optionalSupplement(block: () -> T): T? = try {
+    private suspend fun loadScores(
+        region: AccountRegion,
+        lookup: ChartLookup,
+        onProgress: (String) -> Unit,
+    ): ScoreImportResult = coroutineScope {
+        val difficulties = listOf(
+            "basic" to "0",
+            "advanced" to "1",
+            "expert" to "2",
+            "master" to "3",
+            "remaster" to "4",
+            "utage" to "10",
+        )
+        val completed = AtomicInteger()
+        val semaphore = Semaphore(MAX_CONCURRENT_DX_NET_REQUESTS)
+        val rawScores = difficulties.map { (difficulty, queryValue) ->
+            async {
+                semaphore.withPermit {
+                    val document = getDocument(
+                        region,
+                        "/maimai-mobile/record/musicGenre/search/?genre=99&diff=$queryValue",
+                    )
+                    onProgress(
+                        "Imported score pages ${completed.incrementAndGet()}/${difficulties.size}…",
+                    )
+                    document.select(".w_450.m_15.p_r.f_0")
+                        .mapNotNull { block -> parseScoreBlock(block, difficulty) }
+                }
+            }
+        }.awaitAll().flatten()
+
+        val scores = LinkedHashMap<String, UserScore>()
+        var unmatched = 0
+        rawScores.forEach { raw ->
+            val chart = lookup.find(raw.title, raw.type, raw.difficulty, raw.level)
+            if (chart == null) {
+                unmatched += 1
+            } else {
+                val score = UserScore(
+                    chartKey = chart.chartKey,
+                    achievement = raw.achievement,
+                    grade = Grade.fromAchievement(raw.achievement),
+                    comboMedal = raw.comboMedal,
+                    syncMedal = raw.syncMedal,
+                    dxScore = raw.dxScore,
+                    maxDxScore = raw.maxDxScore,
+                )
+                val existing = scores[chart.chartKey]
+                if (existing == null || score.achievement >= existing.achievement) {
+                    scores[chart.chartKey] = score
+                }
+            }
+        }
+        ScoreImportResult(scores.values.toList(), unmatched)
+    }
+
+    private suspend fun loadRecentDetails(
+        region: AccountRegion,
+        summaries: List<RecentSummary>,
+        onProgress: (String) -> Unit,
+    ): List<PlayDetail> = coroutineScope {
+        val completed = AtomicInteger()
+        val semaphore = Semaphore(MAX_CONCURRENT_DX_NET_REQUESTS)
+        summaries.map { summary ->
+            async {
+                semaphore.withPermit {
+                    val detail = runCatching {
+                        getDocument(
+                            region,
+                            "/maimai-mobile/record/playlogDetail/?idx=" +
+                                java.net.URLEncoder.encode(summary.id, "UTF-8"),
+                        )
+                    }.map { document -> parsePlayDetail(document, summary) }
+                        .getOrNull()
+                    onProgress(
+                        "Imported recent details ${completed.incrementAndGet()}/${summaries.size}…",
+                    )
+                    detail
+                }
+            }
+        }.awaitAll().filterNotNull()
+    }
+
+    private suspend inline fun <T> optionalSupplement(
+        crossinline block: suspend () -> T,
+    ): T? = try {
         block()
     } catch (failure: AuthenticationRequiredException) {
         throw failure
@@ -175,7 +223,7 @@ class MaimaiDxClient(
         null
     }
 
-    private fun getCircleDocuments(region: AccountRegion): List<Document> {
+    private suspend fun getCircleDocuments(region: AccountRegion): List<Document> {
         val main = getDocument(region, "/maimai-mobile/circle/")
         val linkedUrls = linkedSetOf<String>()
         main.select("a[href]").forEach { link ->
@@ -191,14 +239,26 @@ class MaimaiDxClient(
             .map { match -> URI(main.location()).resolve(match.groupValues[1]).toString() }
             .forEach(linkedUrls::add)
 
-        val safePages = linkedUrls.asSequence()
+        val safeUrls = linkedUrls.asSequence()
             .filter { url -> url.startsWith("${region.baseUrl}/maimai-mobile/circle") }
-            .filterNot { url -> url.substringBefore('?').trimEnd('/') == main.location().substringBefore('?').trimEnd('/') }
+            .filterNot {
+                it.substringBefore('?').trimEnd('/') ==
+                    main.location().substringBefore('?').trimEnd('/')
+            }
             .filterNot(::isCircleMutationUrl)
             .distinct()
             .take(12)
-            .mapNotNull { url -> runCatching { getDocument(region, url) }.getOrNull() }
             .toList()
+        val semaphore = Semaphore(MAX_CONCURRENT_DX_NET_REQUESTS)
+        val safePages = coroutineScope {
+            safeUrls.map { url ->
+                async {
+                    semaphore.withPermit {
+                        runCatching { getDocument(region, url) }.getOrNull()
+                    }
+                }
+            }.awaitAll().filterNotNull()
+        }
         return listOf(main) + safePages
     }
 
@@ -218,10 +278,15 @@ class MaimaiDxClient(
             .build()
         return client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) error("DX NET returned HTTP ${response.code}")
-            response.headers.values("Set-Cookie").forEach { value ->
-                cookieManager.setCookie(region.baseUrl, value)
+            val updatedCookies = response.headers.values("Set-Cookie")
+            if (updatedCookies.isNotEmpty()) {
+                synchronized(cookieManager) {
+                    updatedCookies.forEach { value ->
+                        cookieManager.setCookie(region.baseUrl, value)
+                    }
+                    cookieManager.flush()
+                }
             }
-            cookieManager.flush()
             val finalUrl = response.request.url.toString()
             if (
                 !finalUrl.startsWith(region.baseUrl) ||
@@ -326,10 +391,19 @@ class MaimaiDxClient(
             ),
         )
     }
+
+    private companion object {
+        const val MAX_CONCURRENT_DX_NET_REQUESTS = 3
+    }
 }
 data class AccountSyncResult(
     val profile: PlayerProfile,
     val circle: CircleData?,
+)
+
+private data class ScoreImportResult(
+    val scores: List<UserScore>,
+    val unmatched: Int,
 )
 
 private fun isCircleMutationUrl(url: String): Boolean {
@@ -344,7 +418,6 @@ private fun isCircleMutationUrl(url: String): Boolean {
         "withdraw",
         "disband",
         "delete",
-        "invite",
         "transfer",
         "recruit",
         "search",
@@ -468,14 +541,10 @@ internal fun extractCircleData(
     information.putIfUseful("Points until next reward", nextRewardPoints?.toString().orEmpty())
     information.putIfUseful("Last updated by DX NET", updatedAt)
 
-    val pages = documents.map { document ->
-        val content = (document.selectFirst(".main_wrapper") ?: document.body()).clone()
-        content.select("script, style, header, footer, #page-top, #page-bottom").remove()
-        CirclePageInfo(
-            title = circlePageTitle(document),
-            text = content.text().normalizedWhitespace(),
-        )
-    }.filter { it.text.isNotBlank() }.distinctBy { it.title to it.text }
+    val pages = documents
+        .map(::extractCirclePageInfo)
+        .filter { page -> page.text.isNotBlank() || page.items.isNotEmpty() || page.imageUrls.isNotEmpty() }
+        .distinctBy { page -> page.type to page.title }
 
     val members = extractCircleMembers(documents, playerName)
     val rewards = extractCircleRewards(documents, totalPoints)
@@ -502,6 +571,7 @@ internal fun extractCircleData(
             document.selectFirst("[class*=circle] img[src*=Background], [class*=circle] img[src*=background]").imageUrl()
                 .takeIf(String::isNotBlank)
         }.orEmpty(),
+        profileImageUrl = extractCircleProfileImage(documents),
         members = members,
         rewards = rewards,
         information = information.map { (label, value) -> CircleInfoItem(label, value) },
@@ -657,20 +727,140 @@ private val MONTH_NAMES = listOf(
 )
 
 private fun circlePageTitle(document: Document): String {
-    val imageName = document.selectFirst("img.title")?.attr("src")
+    val type = circlePageType(document)
+    return when (type) {
+        CirclePageType.PROFILE -> "Circle profile"
+        CirclePageType.INVITE_ACCEPT -> "Circle invitations"
+        CirclePageType.FESTA -> "Circle Festa"
+        CirclePageType.CHALLENGE_RANKING -> "Circle Challenge ranking"
+        CirclePageType.POINT_REWARD -> "Circle point rewards"
+        CirclePageType.RANKING -> "Circle ranking"
+        CirclePageType.MEMBER -> "Circle members"
+        CirclePageType.OTHER -> circlePageKey(document)
+            .removePrefix("circle_")
+            .split('_')
+            .filter(String::isNotBlank)
+            .joinToString(" ") { word ->
+                word.replace(Regex("""([a-z])([A-Z])"""), "$1 $2")
+                    .replaceFirstChar { character -> character.titlecase(Locale.ROOT) }
+            }
+            .ifBlank {
+                document.title()
+                    .replace("maimai DX NET", "", ignoreCase = true)
+                    .trim(' ', '-', '－')
+                    .ifBlank { "Circle" }
+            }
+    }
+}
+
+private fun circlePageType(document: Document): CirclePageType {
+    val key = circlePageKey(document)
+        .replace("_", "")
+        .replace("-", "")
+        .lowercase(Locale.ROOT)
+    return when {
+        "circlechallenge" in key && "ranking" in key -> CirclePageType.CHALLENGE_RANKING
+        "inviteaccept" in key || "invitation" in key -> CirclePageType.INVITE_ACCEPT
+        "pointreward" in key || ("reward" in key && "circle" in key) -> CirclePageType.POINT_REWARD
+        "festa" in key -> CirclePageType.FESTA
+        "profile" in key -> CirclePageType.PROFILE
+        "member" in key -> CirclePageType.MEMBER
+        "ranking" in key -> CirclePageType.RANKING
+        else -> CirclePageType.OTHER
+    }
+}
+
+private fun circlePageKey(document: Document): String {
+    val titleImage = document.selectFirst("img.title")?.attr("src")
         ?.substringAfterLast('/')
         ?.substringBefore('.')
         ?.removePrefix("title_")
         .orEmpty()
-    if (imageName.isNotBlank()) {
-        return imageName.split('_').joinToString(" ") { word ->
-            word.replaceFirstChar { character -> character.titlecase(Locale.ROOT) }
+    if (titleImage.isNotBlank()) return titleImage
+    return runCatching { URI(document.location()).path }
+        .getOrNull()
+        ?.trim('/')
+        ?.substringAfterLast('/')
+        .orEmpty()
+}
+
+private fun extractCirclePageInfo(document: Document): CirclePageInfo {
+    val content = (document.selectFirst(".main_wrapper") ?: document.body()).clone()
+    content.select("script, style, header, footer, #page-top, #page-bottom").remove()
+    val itemSelector = listOf(
+        "tr",
+        ".circle_member_block",
+        ".circle_member_row",
+        "[class*=ranking_block]",
+        "[class*=rank_block]",
+        "[class*=reward_block]",
+        "[class*=circle_reward]",
+        "[class*=festa_block]",
+        "[class*=challenge_block]",
+        ".basic_block",
+        ".see_through_block",
+    ).joinToString(", ")
+    val items = content.select(itemSelector).mapNotNull { block ->
+        val text = block.text().normalizedWhitespace()
+        if (text.isBlank() || text.length > 500) return@mapNotNull null
+        val imageUrl = block.selectFirst("img[src]").imageUrl()
+            .takeIf(::isUsefulCirclePageImage)
+            .orEmpty()
+        val cells = if (block.tagName() == "tr") {
+            block.children().filter { child -> child.tagName() == "th" || child.tagName() == "td" }
+        } else {
+            emptyList()
         }
-    }
-    return document.title()
-        .replace("maimai DX NET", "", ignoreCase = true)
-        .trim(' ', '-', '－')
-        .ifBlank { "Circle" }
+        val label = if (cells.size >= 2) {
+            cells.first().text().normalizedWhitespace()
+        } else {
+            block.selectFirst(
+                "[class*=name], [class*=title], [class*=header], h1, h2, h3, strong, b",
+            )?.text()?.normalizedWhitespace().orEmpty()
+        }.ifBlank { text }
+        val value = if (cells.size >= 2) {
+            cells.drop(1).joinToString(" ") { cell -> cell.text().normalizedWhitespace() }
+        } else {
+            text.removePrefix(label).trim(' ', ':', '：', '-', '·')
+        }
+        CirclePageItem(label = label, value = value, imageUrl = imageUrl)
+    }.distinctBy { item -> Triple(item.label, item.value, item.imageUrl) }
+
+    val imageUrls = content.select("img[src]")
+        .mapNotNull { image -> image.imageUrl().takeIf(::isUsefulCirclePageImage) }
+        .distinct()
+        .take(12)
+    return CirclePageInfo(
+        title = circlePageTitle(document),
+        text = content.text().normalizedWhitespace(),
+        type = circlePageType(document),
+        items = items,
+        imageUrls = imageUrls,
+    )
+}
+
+private fun extractCircleProfileImage(documents: List<Document>): String =
+    documents.asSequence().mapNotNull { document ->
+        sequenceOf(
+            document.selectFirst("[class*=circle_profile] img[src]"),
+            document.selectFirst("[class*=circle] img[src*=Icon], [class*=circle] img[src*=icon]"),
+            document.selectFirst("[class*=circle] img[src*=Profile], [class*=circle] img[src*=profile]"),
+        ).map { image -> image.imageUrl() }
+            .firstOrNull { url -> isUsefulCirclePageImage(url) }
+    }.firstOrNull().orEmpty()
+
+private fun isUsefulCirclePageImage(url: String): Boolean {
+    if (url.isBlank()) return false
+    val value = url.lowercase(Locale.ROOT)
+    return listOf(
+        "title_",
+        "/header",
+        "/footer",
+        "line_",
+        "/btn_",
+        "/button_",
+        "background",
+    ).none(value::contains)
 }
 
 private fun MutableMap<String, String>.putIfUseful(label: String, value: String) {
