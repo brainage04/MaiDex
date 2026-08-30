@@ -12,6 +12,7 @@ import io.github.brainage04.maidex.data.SongChart
 import io.github.brainage04.maidex.data.SortOrder
 import io.github.brainage04.maidex.data.SyncMedal
 import io.github.brainage04.maidex.data.UserScore
+import io.github.brainage04.maidex.data.builtInFilterPresets
 import io.github.brainage04.maidex.ui.chihoIsCompleted
 import io.github.brainage04.maidex.ui.classBattleClearedCount
 import io.github.brainage04.maidex.ui.titleWithRomanization
@@ -157,6 +158,38 @@ class CatalogControlsTest {
         assertEquals(5, classBattleClearedCount(currentMilestones, "S"))
         assertEquals(19, classBattleClearedCount(currentMilestones, "SSS1"))
         assertEquals(20, classBattleClearedCount(currentMilestones, "LEGEND"))
+    }
+
+    @Test
+    fun `built in filter presets keep requested thresholds and sorting`() {
+        val presets = builtInFilterPresets("CiRCLE PLUS").associateBy { it.name }
+
+        assertEquals(
+            setOf("CiRCLE PLUS"),
+            presets.getValue("Latest version").filters.versions,
+        )
+        assertEquals(
+            setOf(ComboMedal.AP, ComboMedal.AP_PLUS),
+            presets.getValue("13 AP or above").filters.comboMedals,
+        )
+        assertEquals(13.0, presets.getValue("13 AP or above").filters.minLevel)
+        assertEquals(13.6, presets.getValue("13+ AP or above").filters.minLevel)
+        assertEquals(14.0, presets.getValue("14 AP or above").filters.minLevel)
+        assertEquals(14.6, presets.getValue("14+ SSS+ or above").filters.minLevel)
+        assertEquals(
+            setOf(Grade.SSS_PLUS),
+            presets.getValue("14+ SSS+ or above").filters.grades,
+        )
+        assertEquals(15.0, presets.getValue("15").filters.minLevel)
+        assertEquals(15.0, presets.getValue("15").filters.maxLevel)
+        assertEquals(
+            ChartSort.ACHIEVEMENT,
+            presets.getValue("15").sort,
+        )
+        assertEquals(
+            SortOrder.DESCENDING,
+            presets.getValue("15").sortOrder,
+        )
     }
 
     private fun score(chart: SongChart, dxScore: Int) = UserScore(

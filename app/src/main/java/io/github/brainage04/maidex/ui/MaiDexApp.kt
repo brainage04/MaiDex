@@ -1,8 +1,11 @@
 package io.github.brainage04.maidex.ui
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.ReportDrawnWhen
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
@@ -18,7 +21,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -47,9 +49,11 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MilitaryTech
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Groups
@@ -61,6 +65,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -93,6 +98,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -107,15 +113,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -142,6 +148,7 @@ import io.github.brainage04.maidex.data.ComboMedal
 import io.github.brainage04.maidex.data.ClassBattleMetadata
 import io.github.brainage04.maidex.data.ClassBattleMilestone
 import io.github.brainage04.maidex.data.FilterOptions
+import io.github.brainage04.maidex.data.FilterPreset
 import io.github.brainage04.maidex.data.CircleDailySnapshot
 import io.github.brainage04.maidex.data.CircleData
 import io.github.brainage04.maidex.data.CirclePageInfo
@@ -178,12 +185,13 @@ import kotlinx.coroutines.launch
 @Composable
 fun MaiDexApp(viewModel: MainViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val filterPresets by viewModel.filterPresets.collectAsStateWithLifecycle()
     ReportDrawnWhen { !state.isLoading }
     var showFilters by remember { mutableStateOf(false) }
     var selectedChart by remember { mutableStateOf<SongChart?>(null) }
     var showAbout by remember { mutableStateOf(false) }
     var showAccount by remember { mutableStateOf(false) }
-    var showUnlockGuide by remember { mutableStateOf(false) }
+    var unlockGuideSection by remember { mutableStateOf<UnlockGuideSection?>(null) }
     var showDanGuide by remember { mutableStateOf(false) }
     var showScoreStats by remember { mutableStateOf(false) }
     var showCircle by remember { mutableStateOf(false) }
@@ -197,29 +205,32 @@ fun MaiDexApp(viewModel: MainViewModel) {
         }
     }
 
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         ModalNavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     AppDrawerContent(
                         profile = state.profile,
+                        onClose = { scope.launch { drawerState.close() } },
                         onAccount = { closeDrawerAndOpen { showAccount = true } },
                         onCircle = { closeDrawerAndOpen { showCircle = true } },
                         onScoreStats = { closeDrawerAndOpen { showScoreStats = true } },
                         onDanGuide = { closeDrawerAndOpen { showDanGuide = true } },
-                        onUnlockGuide = {
+                        onChihoGuide = {
                             closeDrawerAndOpen {
                                 selectedUnlockGuideEntryId = null
-                                showUnlockGuide = true
+                                unlockGuideSection = UnlockGuideSection.CHIHOS
+                            }
+                        },
+                        onClassBattleGuide = {
+                            closeDrawerAndOpen {
+                                selectedUnlockGuideEntryId = null
+                                unlockGuideSection = UnlockGuideSection.CLASS_BATTLES
                             }
                         },
                         onAbout = { closeDrawerAndOpen { showAbout = true } },
                     )
-                }
             },
         ) {
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 Scaffold(
                     contentWindowInsets = WindowInsets(0),
                     topBar = {
@@ -228,6 +239,11 @@ fun MaiDexApp(viewModel: MainViewModel) {
                             colors = TopAppBarDefaults.topAppBarColors(
                                 containerColor = MaterialTheme.colorScheme.background,
                             ),
+                            navigationIcon = {
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                    Icon(Icons.Default.Menu, contentDescription = "Open navigation menu")
+                                }
+                            },
                             title = {
                                 Text(
                                     "MaiDex",
@@ -245,9 +261,6 @@ fun MaiDexApp(viewModel: MainViewModel) {
                                         textAlign = TextAlign.End,
                                         maxLines = 2,
                                     )
-                                }
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Default.Menu, contentDescription = "Open navigation menu")
                                 }
                             },
                         )
@@ -283,25 +296,28 @@ fun MaiDexApp(viewModel: MainViewModel) {
                             onChart = { selectedChart = it },
                             onUnlockGuide = { entryId ->
                                 selectedUnlockGuideEntryId = entryId
-                                showUnlockGuide = true
+                                unlockGuideSection = UnlockMetadata.guideEntry(entryId)?.section
                             },
                         )
                     }
                 }
-            }
         }
-    }
 
     if (showFilters) {
         FilterDialog(
             filters = state.filters,
+            sort = state.sort,
+            sortOrder = state.sortOrder,
             options = state.options,
+            presets = filterPresets,
             hasScores = state.scores.isNotEmpty(),
             onDismiss = { showFilters = false },
-            onApply = {
-                viewModel.applyFilters(it)
+            onApply = { appliedFilters, appliedSort, appliedSortOrder ->
+                viewModel.applyFilters(appliedFilters, appliedSort, appliedSortOrder)
                 showFilters = false
             },
+            onSavePreset = viewModel::saveFilterPreset,
+            onDeletePreset = viewModel::deleteFilterPreset,
         )
     }
     selectedChart?.let { chart ->
@@ -314,7 +330,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
             onOpenGuide = { entryId ->
                 selectedChart = null
                 selectedUnlockGuideEntryId = entryId
-                showUnlockGuide = true
+                unlockGuideSection = UnlockMetadata.guideEntry(entryId)?.section
             },
         )
     }
@@ -323,7 +339,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
             profile = state.profile,
             importStatus = state.importStatus,
             playCountSnapshots = state.playCountSnapshots,
-            onImport = viewModel::importAccount,
+            onImportData = viewModel::importData,
             onClear = viewModel::clearAccount,
             onDismissStatus = viewModel::dismissImportStatus,
             onDismiss = { showAccount = false },
@@ -334,6 +350,10 @@ fun MaiDexApp(viewModel: MainViewModel) {
             history = state.circleHistory,
             snapshots = state.circleSnapshots,
             trackingSettings = state.trackingSettings,
+            importStatus = state.importStatus,
+            onSync = {
+                viewModel.importData(state.profile?.region ?: AccountRegion.INTERNATIONAL)
+            },
             onDismiss = { showCircle = false },
         )
     }
@@ -348,14 +368,15 @@ fun MaiDexApp(viewModel: MainViewModel) {
             },
         )
     }
-    if (showUnlockGuide) {
+    unlockGuideSection?.let { section ->
         UnlockGuideDialog(
+            section = section,
             initialEntryId = selectedUnlockGuideEntryId,
             charts = state.allCharts,
             scores = state.scores,
             profile = state.profile,
             onDismiss = {
-                showUnlockGuide = false
+                unlockGuideSection = null
                 selectedUnlockGuideEntryId = null
             },
         )
@@ -385,25 +406,37 @@ fun MaiDexApp(viewModel: MainViewModel) {
 @Composable
 private fun AppDrawerContent(
     profile: PlayerProfile?,
+    onClose: () -> Unit,
     onAccount: () -> Unit,
     onCircle: () -> Unit,
     onScoreStats: () -> Unit,
     onDanGuide: () -> Unit,
-    onUnlockGuide: () -> Unit,
+    onChihoGuide: () -> Unit,
+    onClassBattleGuide: () -> Unit,
     onAbout: () -> Unit,
 ) {
     ModalDrawerSheet(
         modifier = Modifier
             .fillMaxHeight()
             .widthIn(min = 280.dp, max = 360.dp),
-        drawerShape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp),
+        drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
     ) {
-        Text(
-            "MaiDex",
-            modifier = Modifier.padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 8.dp),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Black,
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 24.dp, top = 16.dp, end = 8.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "MaiDex",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black,
+            )
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = "Close navigation menu")
+            }
+        }
         Text(
             profile?.name ?: "Offline catalog",
             modifier = Modifier.padding(horizontal = 24.dp),
@@ -449,10 +482,17 @@ private fun AppDrawerContent(
             modifier = Modifier.padding(horizontal = 12.dp),
         )
         NavigationDrawerItem(
-            label = { Text("Chiho and class battle guides") },
+            label = { Text("Chiho guides") },
             selected = false,
-            onClick = onUnlockGuide,
+            onClick = onChihoGuide,
             icon = { Icon(Icons.Default.Map, contentDescription = null) },
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+        NavigationDrawerItem(
+            label = { Text("Class Battle guides") },
+            selected = false,
+            onClick = onClassBattleGuide,
+            icon = { Icon(Icons.Default.Groups, contentDescription = null) },
             modifier = Modifier.padding(horizontal = 12.dp),
         )
         Spacer(Modifier.weight(1f))
@@ -513,12 +553,12 @@ private fun InfoDialog(
                 )
                 InfoSection(
                     title = "Catalog freshness",
-                    body = "arcade-songs does not publish a fixed update schedule. Its current dataset reports " +
-                        "${info?.updateTime?.take(10).orEmpty().ifBlank { "no source date" }}. " +
+                    body = "arcade-songs does not publish a fixed update schedule. " +
                         if ((info?.lastCheckedAt ?: 0L) > 0L) {
-                            "MaiDex last checked it ${formatTrackedTime(info?.lastCheckedAt ?: 0L)}."
+                            "MaiDex last checked the published dataset " +
+                                "${formatTrackedTime(info?.lastCheckedAt ?: 0L)}."
                         } else {
-                            "MaiDex will check it when Android next runs the hourly updater."
+                            "MaiDex will check the published dataset when Android next runs the hourly updater."
                         },
                 )
                 InfoSection(
@@ -535,7 +575,7 @@ private fun InfoDialog(
                 )
                 InfoSection(
                     title = "Images and matching",
-                    body = "Cover art is cached after viewing, and profile/circle artwork is cached after Refresh. " +
+                    body = "Cover art is cached after viewing, and profile/circle artwork is cached after import. " +
                         "DX NET scores are matched by song, chart type, difficulty, and level. A source change " +
                         "is downloaded hourly and used after the next app launch.",
                 )
@@ -602,25 +642,47 @@ private fun CatalogContent(
     onChart: (SongChart) -> Unit,
     onUnlockGuide: (String) -> Unit,
 ) {
+    var searchField by remember {
+        mutableStateOf(
+            TextFieldValue(
+                text = state.filters.search,
+                selection = TextRange(state.filters.search.length),
+            ),
+        )
+    }
+    LaunchedEffect(state.filters.search) {
+        if (state.filters.search != searchField.text) {
+            searchField = TextFieldValue(
+                text = state.filters.search,
+                selection = TextRange(state.filters.search.length),
+            )
+        }
+    }
     Column(modifier = modifier.fillMaxSize()) {
         OutlinedTextField(
-            value = state.filters.search,
-            onValueChange = onSearch,
+            value = searchField,
+            onValueChange = { value ->
+                searchField = value
+                onSearch(value.text)
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 12.dp, top = 4.dp, end = 12.dp),
             singleLine = true,
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             trailingIcon = {
-                if (state.filters.search.isNotEmpty()) {
-                    IconButton(onClick = { onSearch("") }) {
+                if (searchField.text.isNotEmpty()) {
+                    IconButton(onClick = {
+                        searchField = TextFieldValue("")
+                        onSearch("")
+                    }) {
                         Icon(Icons.Default.Clear, contentDescription = "Clear search")
                     }
                 }
             },
             label = { Text("Search") },
             placeholder = { Text("Title, romaji, artist, or notes designer") },
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(6.dp),
         )
         CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 40.dp) {
             Column(
@@ -645,37 +707,53 @@ private fun CatalogContent(
                         modifier = Modifier
                             .weight(1f)
                             .height(44.dp),
+                        shape = RoundedCornerShape(6.dp),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
                     ) {
-                        Icon(
-                            if (state.sortOrder == SortOrder.ASCENDING) {
-                                Icons.Default.ArrowUpward
-                            } else {
-                                Icons.Default.ArrowDownward
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            state.sortOrder.label,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Box(Modifier.fillMaxWidth()) {
+                            Icon(
+                                if (state.sortOrder == SortOrder.ASCENDING) {
+                                    Icons.Default.ArrowUpward
+                                } else {
+                                    Icons.Default.ArrowDownward
+                                },
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .align(Alignment.CenterStart),
+                            )
+                            Text(
+                                state.sortOrder.label,
+                                modifier = Modifier.align(Alignment.Center),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
                     }
-                    OutlinedButton(
-                        onClick = onOpenFilters,
+                    Box(
                         modifier = Modifier
-                            .width(IntrinsicSize.Min)
+                            .width(48.dp)
                             .height(44.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
                     ) {
-                        Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text("Filters", maxLines = 1)
+                        OutlinedButton(
+                            onClick = onOpenFilters,
+                            modifier = Modifier.fillMaxSize(),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.FilterList,
+                                contentDescription = "Filters",
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
                         if (state.filters.activeCount > 0) {
-                            Spacer(Modifier.width(5.dp))
-                            Badge {
+                            Badge(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 4.dp, y = (-4).dp),
+                            ) {
                                 Text(
                                     state.filters.activeCount.toString(),
                                     fontWeight = FontWeight.Bold,
@@ -738,20 +816,25 @@ private fun SortMenu(
         OutlinedButton(
             onClick = { expanded = true },
             modifier = Modifier.fillMaxSize(),
+            shape = RoundedCornerShape(6.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
         ) {
-            Text(
-                selected.label,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Start,
-            )
-            Icon(
-                Icons.Default.ArrowDropDown,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
+            Box(Modifier.fillMaxWidth()) {
+                Text(
+                    selected.label,
+                    modifier = Modifier.align(Alignment.Center),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+                Icon(
+                    Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .align(Alignment.CenterEnd),
+                )
+            }
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             ChartSort.entries.forEach { option ->
@@ -1252,7 +1335,6 @@ private fun DxStarImage(stars: Int) {
 
 
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DanGuideDialog(
     chartLookup: Map<String, SongChart>,
@@ -1262,6 +1344,7 @@ private fun DanGuideDialog(
 ) {
     val context = LocalContext.current
     var region by remember(initialRegion) { mutableStateOf(initialRegion) }
+    var version by remember { mutableStateOf(DanCourseMetadata.version) }
     var group by remember { mutableStateOf(DanCourseGroup.TRUE) }
     val courses = DanCourseMetadata.courses.filter { it.group == group }
 
@@ -1278,14 +1361,12 @@ private fun DanGuideDialog(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Dan courses", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text(
-                            "${DanCourseMetadata.version} · 22 courses · 88 charts",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    Text(
+                        "Dan courses",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
                     IconButton(
                         onClick = {
                             context.startActivity(
@@ -1306,65 +1387,37 @@ private fun DanGuideDialog(
                     shape = RoundedCornerShape(12.dp),
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            "Region",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AccountRegion.entries.forEach { option ->
-                                FilterChip(
-                                    selected = region == option,
-                                    onClick = { region = option },
-                                    label = { Text(option.label) },
-                                )
-                            }
-                        }
-                        HorizontalDivider(Modifier.padding(vertical = 2.dp))
-                        Text(
-                            "Dan type",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            DanCourseGroup.entries.forEach { option ->
-                                FilterChip(
-                                    selected = group == option,
-                                    onClick = { group = option },
-                                    label = {
-                                        Text(
-                                            when (option) {
-                                                DanCourseGroup.NORMAL -> "Dan 1–10"
-                                                DanCourseGroup.TRUE -> "Shin Dan"
-                                                DanCourseGroup.URA -> "Ura Kaiden"
-                                            },
-                                        )
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Text(
-                        "Play four fixed charts in order and finish with Life remaining. " +
-                            "Normal courses continue at 0 Life; Shin Dan and Ura Kaiden end immediately. " +
-                            "Clear Tenth Dan → Shin Dan; Shin Tenth → Shin Kaiden → Ura Kaiden.",
                         modifier = Modifier.padding(10.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        LabeledDropdown(
+                            label = "Version",
+                            value = version,
+                            options = listOf(DanCourseMetadata.version),
+                            optionLabel = { it },
+                            onSelect = { version = it },
+                        )
+                        LabeledDropdown(
+                            label = "Region",
+                            value = region,
+                            options = AccountRegion.entries,
+                            optionLabel = AccountRegion::label,
+                            onSelect = { region = it },
+                        )
+                        LabeledDropdown(
+                            label = "Dan Type",
+                            value = group,
+                            options = DanCourseGroup.entries,
+                            optionLabel = { option ->
+                                when (option) {
+                                    DanCourseGroup.NORMAL -> "Dan 1–10"
+                                    DanCourseGroup.TRUE -> "Shin Dan"
+                                    DanCourseGroup.URA -> "Ura Kaiden"
+                                }
+                            },
+                            onSelect = { group = it },
+                        )
+                    }
                 }
                 LazyColumn(
                     modifier = Modifier
@@ -1381,6 +1434,48 @@ private fun DanGuideDialog(
                             onChart = onChart,
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun <T> LabeledDropdown(
+    label: String,
+    value: T,
+    options: List<T>,
+    optionLabel: (T) -> String,
+    onSelect: (T) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        Box(Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(6.dp),
+            ) {
+                Text(
+                    optionLabel(value),
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Start,
+                )
+                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(optionLabel(option)) },
+                        onClick = {
+                            onSelect(option)
+                            expanded = false
+                        },
+                    )
                 }
             }
         }
@@ -1533,6 +1628,7 @@ private fun DanTrackRow(
 
 @Composable
 private fun UnlockGuideDialog(
+    section: UnlockGuideSection,
     initialEntryId: String?,
     charts: List<SongChart>,
     scores: Map<String, UserScore>,
@@ -1540,11 +1636,10 @@ private fun UnlockGuideDialog(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
-    val initialEntry = remember(initialEntryId) {
-        initialEntryId?.let(UnlockMetadata::guideEntry)
-    }
-    var section by remember(initialEntryId) {
-        mutableStateOf(initialEntry?.section ?: UnlockGuideSection.CHIHOS)
+    val initialEntry = remember(initialEntryId, section) {
+        initialEntryId
+            ?.let(UnlockMetadata::guideEntry)
+            ?.takeIf { it.section == section }
     }
     val romanizedTitles = remember(charts) {
         charts.asSequence().associate { it.sourceSongId to it.titleRomanized }
@@ -1568,7 +1663,7 @@ private fun UnlockGuideDialog(
         bySong to bySongAndLevel
     }
     val entries = UnlockMetadata.guideEntries.filter { it.section == section }
-    val orderedEntries = if (initialEntry?.section == section) {
+    val orderedEntries = if (initialEntry != null) {
         listOf(initialEntry) + entries.filterNot { it.id == initialEntry.id }
     } else {
         entries
@@ -1588,32 +1683,17 @@ private fun UnlockGuideDialog(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Unlock guides", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text(
-                            "DX NET Chiho completion and Friend Matching class progress",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        profile?.friendClass?.takeIf(String::isNotBlank)?.let { friendClass ->
-                            Text(
-                                "Current Friend Matching class: $friendClass",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
+                    Text(
+                        if (section == UnlockGuideSection.CHIHOS) {
+                            "Chiho guides"
+                        } else {
+                            "Class Battle guides"
+                        },
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
                     TextButton(onClick = onDismiss) { Text("Close") }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    UnlockGuideSection.entries.forEach { option ->
-                        FilterChip(
-                            selected = section == option,
-                            onClick = { section = option },
-                            label = { Text(option.label) },
-                        )
-                    }
                 }
                 LazyColumn(
                     modifier = Modifier
@@ -1923,16 +2003,42 @@ private fun ClassBattleMilestoneRow(
 @Composable
 private fun FilterDialog(
     filters: ChartFilters,
+    sort: ChartSort,
+    sortOrder: SortOrder,
     options: FilterOptions,
+    presets: List<FilterPreset>,
     hasScores: Boolean,
     onDismiss: () -> Unit,
-    onApply: (ChartFilters) -> Unit,
+    onApply: (ChartFilters, ChartSort, SortOrder) -> Unit,
+    onSavePreset: (String, ChartFilters, ChartSort, SortOrder) -> Unit,
+    onDeletePreset: (String) -> Unit,
 ) {
     var draft by remember(filters) { mutableStateOf(filters) }
     var minLevel by remember(filters) { mutableStateOf(filters.minLevel?.toString().orEmpty()) }
     var maxLevel by remember(filters) { mutableStateOf(filters.maxLevel?.toString().orEmpty()) }
     var minBpm by remember(filters) { mutableStateOf(filters.minBpm?.toString().orEmpty()) }
     var maxBpm by remember(filters) { mutableStateOf(filters.maxBpm?.toString().orEmpty()) }
+    var draftSort by remember(sort) { mutableStateOf(sort) }
+    var draftSortOrder by remember(sortOrder) { mutableStateOf(sortOrder) }
+    var showSavePreset by remember { mutableStateOf(false) }
+    var presetName by remember { mutableStateOf("") }
+    val normalizedDraft = {
+        draft.copy(
+            minLevel = minLevel.toDoubleOrNull(),
+            maxLevel = maxLevel.toDoubleOrNull(),
+            minBpm = minBpm.toIntOrNull(),
+            maxBpm = maxBpm.toIntOrNull(),
+        )
+    }
+    val applyPreset: (FilterPreset) -> Unit = { preset ->
+        draft = preset.filters.copy(search = filters.search)
+        minLevel = preset.filters.minLevel?.toString().orEmpty()
+        maxLevel = preset.filters.maxLevel?.toString().orEmpty()
+        minBpm = preset.filters.minBpm?.toString().orEmpty()
+        maxBpm = preset.filters.maxBpm?.toString().orEmpty()
+        draftSort = preset.sort
+        draftSortOrder = preset.sortOrder
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -1956,6 +2062,8 @@ private fun FilterDialog(
                         maxLevel = ""
                         minBpm = ""
                         maxBpm = ""
+                        draftSort = ChartSort.LEVEL
+                        draftSortOrder = SortOrder.DESCENDING
                     }) { Text("Reset") }
                 }
                 LazyColumn(
@@ -1964,6 +2072,74 @@ private fun FilterDialog(
                         .weight(1f),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    item(key = "presets") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "Presets",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            FilterPresetMenu(
+                                presets = presets,
+                                onSelect = applyPreset,
+                                onDelete = onDeletePreset,
+                            )
+                            if (showSavePreset) {
+                                OutlinedTextField(
+                                    value = presetName,
+                                    onValueChange = { presetName = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text("Preset name") },
+                                    singleLine = true,
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                ) {
+                                    TextButton(onClick = {
+                                        showSavePreset = false
+                                        presetName = ""
+                                    }) { Text("Cancel") }
+                                    Button(
+                                        enabled = presetName.isNotBlank(),
+                                        onClick = {
+                                            onSavePreset(
+                                                presetName,
+                                                normalizedDraft(),
+                                                draftSort,
+                                                draftSortOrder,
+                                            )
+                                            showSavePreset = false
+                                            presetName = ""
+                                        },
+                                    ) { Text("Save") }
+                                }
+                            } else {
+                                TextButton(onClick = { showSavePreset = true }) {
+                                    Text("Save current as preset")
+                                }
+                            }
+                        }
+                    }
+                    item(key = "preset-divider") { HorizontalDivider() }
+                    item(key = "sort") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LabeledDropdown(
+                                label = "Sort",
+                                value = draftSort,
+                                options = ChartSort.entries,
+                                optionLabel = ChartSort::label,
+                                onSelect = { draftSort = it },
+                            )
+                            LabeledDropdown(
+                                label = "Sort order",
+                                value = draftSortOrder,
+                                options = SortOrder.entries,
+                                optionLabel = SortOrder::label,
+                                onSelect = { draftSortOrder = it },
+                            )
+                        }
+                    }
                     item(key = "artist") {
                         OutlinedTextField(
                             value = draft.artist,
@@ -2127,16 +2303,67 @@ private fun FilterDialog(
                 ) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     Button(onClick = {
-                        onApply(
-                            draft.copy(
-                                minLevel = minLevel.toDoubleOrNull(),
-                                maxLevel = maxLevel.toDoubleOrNull(),
-                                minBpm = minBpm.toIntOrNull(),
-                                maxBpm = maxBpm.toIntOrNull(),
-                            ),
-                        )
+                        onApply(normalizedDraft(), draftSort, draftSortOrder)
                     }) { Text("Show results") }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilterPresetMenu(
+    presets: List<FilterPreset>,
+    onSelect: (FilterPreset) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(6.dp),
+        ) {
+            Text(
+                "Apply preset",
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Start,
+            )
+            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            presets.forEach { preset ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(preset.name)
+                            Text(
+                                "${preset.sort.label} · ${preset.sortOrder.label}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    onClick = {
+                        onSelect(preset)
+                        expanded = false
+                    },
+                    trailingIcon = if (preset.isBuiltIn) {
+                        null
+                    } else {
+                        {
+                            IconButton(onClick = { onDelete(preset.id) }) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete ${preset.name}",
+                                )
+                            }
+                        }
+                    },
+                )
             }
         }
     }
@@ -2204,7 +2431,7 @@ private fun AccountDialog(
     profile: PlayerProfile?,
     importStatus: ImportStatus,
     playCountSnapshots: List<PlayCountSnapshot>,
-    onImport: (AccountRegion) -> Unit,
+    onImportData: (AccountRegion) -> Unit,
     onClear: () -> Unit,
     onDismissStatus: () -> Unit,
     onDismiss: () -> Unit,
@@ -2214,6 +2441,11 @@ private fun AccountDialog(
     var showPlayCountHistory by remember(profile) { mutableStateOf(false) }
     val context = LocalContext.current
     val isImporting = importStatus is ImportStatus.Running
+    val loginLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) onImportData(region)
+    }
 
     Dialog(
         onDismissRequest = {
@@ -2232,19 +2464,13 @@ private fun AccountDialog(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "maimai DX NET",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Black,
-                            maxLines = 1,
-                        )
-                        Text(
-                            "Official account data · device only",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    Text(
+                        "maimai DX NET",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                    )
                     TextButton(onClick = {
                         onDismissStatus()
                         onDismiss()
@@ -2314,7 +2540,7 @@ private fun AccountDialog(
                             Column {
                                 Text("No DX NET profile imported", fontWeight = FontWeight.Bold)
                                 Text(
-                                    "Sign in, then import your scores.",
+                                    "Sign in to import your profile, scores, play history, and circle data.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -2377,8 +2603,8 @@ private fun AccountDialog(
                         shape = RoundedCornerShape(14.dp),
                     ) {
                         Text(
-                            "Sign-in opens the official DX NET site full screen. " +
-                                "MaiDex reads your profile and scores only after DX NET confirms the session.",
+                            "Sign-in opens the official DX NET site full screen. MaiDex automatically imports " +
+                                "your profile, scores, play history, and circle data after sign-in succeeds.",
                             modifier = Modifier.padding(14.dp),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2393,21 +2619,18 @@ private fun AccountDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(
-                        onClick = { context.startActivity(DxNetLoginActivity.intent(context, region)) },
+                        onClick = { loginLauncher.launch(DxNetLoginActivity.intent(context, region)) },
                         enabled = !isImporting,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text("Sign in", maxLines = 1)
                     }
                     Button(
-                        onClick = { onImport(region) },
+                        onClick = { onImportData(region) },
                         enabled = !isImporting,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text(
-                            if (profile == null) "Import scores" else "Refresh",
-                            maxLines = 1,
-                        )
+                        Text("Import data", maxLines = 1)
                     }
                 }
                 if (profile != null) {
@@ -2434,11 +2657,20 @@ private fun AccountDialog(
     }
 }
 
+private val DxCircleSky = Color(0xFF55BCE9)
+private val DxCircleBlue = Color(0xFF197CC5)
+private val DxCircleBlueDark = Color(0xFF075A9E)
+private val DxCirclePink = Color(0xFFF34BA7)
+private val DxCirclePinkLight = Color(0xFFFFD6EB)
+private val DxCircleInk = Color(0xFF263238)
+
 @Composable
 private fun CircleDialog(
     history: List<CircleData>,
     snapshots: List<CircleDailySnapshot>,
     trackingSettings: TrackingSettings,
+    importStatus: ImportStatus,
+    onSync: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val current = history.firstOrNull()
@@ -2463,13 +2695,14 @@ private fun CircleDialog(
                 .fillMaxWidth(0.96f)
                 .fillMaxHeight(0.94f),
             shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
+            color = DxCircleSky,
         ) {
             Column {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 6.dp),
+                        .background(DxCircleBlueDark)
+                        .padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
@@ -2477,18 +2710,19 @@ private fun CircleDialog(
                             current?.name ?: "Circle",
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Black,
+                            color = Color.White,
                         )
                         Text(
                             if (current == null) {
-                                "Refresh DX NET to import circle data"
+                                "Sign in to import circle data"
                             } else {
-                                "${current.month} · stored only on this device"
+                                current.month
                             },
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = Color.White.copy(alpha = 0.82f),
                         )
                     }
-                    TextButton(onClick = onDismiss) { Text("Close") }
+                    TextButton(onClick = onDismiss) { Text("Close", color = Color.White) }
                 }
                 LazyColumn(
                     modifier = Modifier
@@ -2502,19 +2736,22 @@ private fun CircleDialog(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     item(key = "tracking") {
-                        CircleTrackingCard(trackingSettings)
+                        CircleTrackingCard(
+                            settings = trackingSettings,
+                            isSyncing = importStatus is ImportStatus.Running,
+                            onSync = onSync,
+                        )
                     }
                     if (current == null) {
                         item(key = "empty") {
                             Card(
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                ),
+                                colors = CardDefaults.cardColors(containerColor = Color.White),
+                                border = BorderStroke(2.dp, DxCircleBlueDark),
+                                shape = RoundedCornerShape(8.dp),
                             ) {
                                 Text(
-                                    "No circle information has been captured yet. Sign in to DX NET and " +
-                                        "tap Refresh in the account section. Monthly history starts with " +
-                                        "the first successful circle sync.",
+                                    "No circle information has been captured yet. Sign in to DX NET or use " +
+                                        "Sync now. Monthly history starts with the first successful circle sync.",
                                     modifier = Modifier.padding(14.dp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -2523,6 +2760,21 @@ private fun CircleDialog(
                     } else {
                         item(key = "overview") {
                             CircleOverviewCard(current)
+                        }
+                        val structuredPages = current.pages.filter { page ->
+                            page.type != CirclePageType.OTHER &&
+                                page.type != CirclePageType.PROFILE
+                        }
+                        if (structuredPages.isNotEmpty()) {
+                            item(key = "details-heading") {
+                                CircleWebTitle("Official circle pages")
+                            }
+                            items(
+                                structuredPages,
+                                key = { page -> "page-${page.type}-${page.title}" },
+                            ) { page ->
+                                CirclePageCard(page, current)
+                            }
                         }
                         if (snapshots.isNotEmpty()) {
                             item(key = "history-heading") {
@@ -2581,23 +2833,6 @@ private fun CircleDialog(
                         items(history, key = { circle -> "month-${circle.month}-${circle.key}" }) { circle ->
                             CircleMonthCard(circle, initiallyExpanded = circle === current)
                         }
-                        val structuredPages = current.pages.filter { page ->
-                            page.type != CirclePageType.OTHER
-                        }
-                        if (structuredPages.isNotEmpty()) {
-                            item(key = "details-heading") {
-                                CircleSectionHeading(
-                                    "DX NET circle sections",
-                                    "Profile, events, rewards, rankings, and members from the official pages",
-                                )
-                            }
-                            items(
-                                structuredPages,
-                                key = { page -> "page-${page.type}-${page.title}" },
-                            ) { page ->
-                                CirclePageCard(page, current)
-                            }
-                        }
                     }
                 }
             }
@@ -2606,61 +2841,112 @@ private fun CircleDialog(
 }
 
 @Composable
-private fun CircleTrackingCard(settings: TrackingSettings) {
+private fun CircleWebTitle(title: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = DxCircleBlue,
+        shape = RoundedCornerShape(50),
+        border = BorderStroke(2.dp, Color.White),
+        shadowElevation = 2.dp,
+    ) {
+        Text(
+            title,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+            color = Color.White,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun CircleOfficialTitle(type: CirclePageType, title: String) {
+    val imageUrl = DxNetAssets.circleTitleImageUrl(type)
+    if (imageUrl.isNotBlank()) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = title,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(38.dp),
+            contentScale = ContentScale.Fit,
+        )
+    } else {
+        CircleWebTitle(title)
+    }
+}
+
+@Composable
+private fun CircleMetricPill(value: String, label: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        color = Color.White,
+        shape = RoundedCornerShape(50),
+        border = BorderStroke(2.dp, DxCirclePink),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(value, color = DxCirclePink, fontWeight = FontWeight.Black)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = DxCircleInk)
+        }
+    }
+}
+
+@Composable
+private fun CircleTrackingCard(
+    settings: TrackingSettings,
+    isSyncing: Boolean,
+    onSync: () -> Unit,
+) {
     Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-        ),
-        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(2.dp, DxCircleBlueDark),
+        shape = RoundedCornerShape(8.dp),
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Hourly DX NET sync", fontWeight = FontWeight.Bold)
-                    Text(
-                        "Circle/member points and both play counts",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Surface(
-                    color = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shape = RoundedCornerShape(50),
-                ) {
-                    Text(
-                        "Every hour",
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
+            CircleWebTitle("Circle data sync")
             val status = when {
+                isSyncing -> "Syncing now…"
                 settings.lastError.isNotBlank() ->
-                    "Last check failed: ${settings.lastError}"
+                    "Last sync failed: ${settings.lastError}"
                 settings.lastSuccessAt > 0L ->
                     "Last synced ${formatTrackedTime(settings.lastSuccessAt)}"
-                else -> "Waiting for the first scheduled check"
+                else -> "Not synced yet"
             }
             Text(
                 status,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (settings.lastError.isBlank()) {
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (settings.lastError.isBlank() || isSyncing) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
                     MaterialTheme.colorScheme.error
                 },
             )
+            Button(
+                onClick = onSync,
+                enabled = !isSyncing,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = DxCirclePink,
+                    contentColor = Color.White,
+                    disabledContainerColor = DxCirclePinkLight,
+                    disabledContentColor = DxCircleInk.copy(alpha = 0.55f),
+                ),
+            ) {
+                Text(
+                    if (isSyncing) "Syncing…" else "Sync now",
+                    fontWeight = FontWeight.Black,
+                )
+            }
             Text(
-                "The saved DX NET session must still be valid. Android may defer the exact run time " +
-                    "because of battery or network restrictions.",
+                "Automatic sync remains scheduled hourly. Android may defer a run because of battery " +
+                    "or network restrictions.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -2671,24 +2957,25 @@ private fun CircleTrackingCard(settings: TrackingSettings) {
 @Composable
 private fun CircleOverviewCard(circle: CircleData) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(2.dp, DxCircleBlueDark),
+        shape = RoundedCornerShape(8.dp),
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            Text("Current month", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            CircleOfficialTitle(CirclePageType.PROFILE, "Circle profile")
             CircleProfileVisual(circle)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                InfoMetric(
-                    value = formatCount(circle.totalPoints),
-                    label = "Circle points",
+                CircleMetricPill(
+                    value = "${formatCount(circle.totalPoints)} PT",
+                    label = "Circle total points",
                     modifier = Modifier.weight(1f),
                 )
-                InfoMetric(
-                    value = circle.regionalRank?.let { "#${formatCount(it)}" } ?: "—",
-                    label = circle.rankingLabel.ifBlank { "Regional rank" },
+                CircleMetricPill(
+                    value = circle.regionalRank?.let { "Rank ${formatCount(it)}" } ?: "—",
+                    label = circle.rankingLabel.ifBlank { "Current ranking" },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -2703,8 +2990,9 @@ private fun CircleOverviewCard(circle: CircleData) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     circle.tags.forEach { tag ->
                         Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            shape = RoundedCornerShape(50),
+                            color = DxCirclePinkLight,
+                            shape = RoundedCornerShape(4.dp),
+                            border = BorderStroke(1.dp, DxCirclePink),
                         ) {
                             Text(
                                 tag,
@@ -2725,8 +3013,8 @@ private fun CircleProfileVisual(circle: CircleData) {
         modifier = Modifier
             .fillMaxWidth()
             .height(156.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.primaryContainer),
+            .clip(RoundedCornerShape(8.dp))
+            .background(DxCirclePinkLight),
     ) {
         circle.backgroundUrl.takeIf(String::isNotBlank)?.let { url ->
             AsyncImage(
@@ -2752,8 +3040,9 @@ private fun CircleProfileVisual(circle: CircleData) {
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
                 .padding(10.dp),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-            shape = RoundedCornerShape(10.dp),
+            color = Color.White.copy(alpha = 0.94f),
+            shape = RoundedCornerShape(6.dp),
+            border = BorderStroke(2.dp, DxCirclePink),
             shadowElevation = 2.dp,
         ) {
             Row(
@@ -2762,8 +3051,9 @@ private fun CircleProfileVisual(circle: CircleData) {
             ) {
                 Surface(
                     modifier = Modifier.size(54.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = RoundedCornerShape(10.dp),
+                    color = Color.White,
+                    shape = RoundedCornerShape(6.dp),
+                    border = BorderStroke(1.dp, DxCirclePink),
                 ) {
                     if (circle.profileImageUrl.isNotBlank()) {
                         AsyncImage(
@@ -2808,8 +3098,9 @@ private fun CircleProfileVisual(circle: CircleData) {
 private fun CircleMonthCard(circle: CircleData, initiallyExpanded: Boolean) {
     var expanded by remember(circle.month, circle.key) { mutableStateOf(initiallyExpanded) }
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(2.dp, DxCircleBlueDark),
+        shape = RoundedCornerShape(8.dp),
     ) {
         Column {
             Row(
@@ -2876,43 +3167,24 @@ private fun CircleMonthCard(circle: CircleData, initiallyExpanded: Boolean) {
 
 @Composable
 private fun CirclePageCard(page: CirclePageInfo, circle: CircleData) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = when (page.type) {
-                CirclePageType.FESTA -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
-                CirclePageType.CHALLENGE_RANKING -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
-                else -> MaterialTheme.colorScheme.surfaceVariant
-            },
-        ),
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        CircleOfficialTitle(page.type, page.title)
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Color.White,
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(2.dp, DxCircleBlueDark),
         ) {
-            Text(page.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-            val description = when (page.type) {
-                CirclePageType.PROFILE -> "The current circle profile shown on DX NET"
-                CirclePageType.INVITE_ACCEPT -> "Pending circle invitations and join requests"
-                CirclePageType.FESTA -> "Current Circle Festa status and progress"
-                CirclePageType.CHALLENGE_RANKING -> "Weekly Circle Challenge member leaderboard"
-                CirclePageType.POINT_REWARD -> "Monthly rewards earned with circle points"
-                CirclePageType.RANKING -> "Circle point leaderboard"
-                CirclePageType.MEMBER -> "Members and their circle point contributions"
-                CirclePageType.OTHER -> ""
-            }
-            if (description.isNotBlank()) {
-                Text(
-                    description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            when (page.type) {
-                CirclePageType.PROFILE -> CircleProfileVisual(circle)
-                CirclePageType.POINT_REWARD -> CircleRewardPage(circle)
-                CirclePageType.MEMBER -> CircleMemberPage(circle)
-                else -> CircleStructuredPage(page)
+            Column(
+                modifier = Modifier.padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                when (page.type) {
+                    CirclePageType.PROFILE -> CircleProfileVisual(circle)
+                    CirclePageType.POINT_REWARD -> CircleRewardPage(circle)
+                    CirclePageType.MEMBER -> CircleMemberPage(circle)
+                    else -> CircleStructuredPage(page)
+                }
             }
         }
     }
@@ -2927,12 +3199,9 @@ private fun CircleRewardPage(circle: CircleData) {
     circle.rewards.sortedBy { reward -> reward.pointsRequired }.forEach { reward ->
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = if (reward.earned) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surface
-            },
-            shape = RoundedCornerShape(10.dp),
+            color = Color.White,
+            shape = RoundedCornerShape(4.dp),
+            border = BorderStroke(1.dp, DxCircleInk),
         ) {
             Row(
                 modifier = Modifier.padding(9.dp),
@@ -2958,11 +3227,18 @@ private fun CircleRewardPage(circle: CircleData) {
                     )
                 }
                 if (reward.earned) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = "Received",
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
+                    Surface(
+                        color = Color(0xFFFFC72C),
+                        shape = RoundedCornerShape(50),
+                    ) {
+                        Text(
+                            "GET",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                        )
+                    }
                 }
             }
         }
@@ -2978,12 +3254,9 @@ private fun CircleMemberPage(circle: CircleData) {
     circle.members.sortedByDescending { member -> member.points }.forEachIndexed { index, member ->
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = if (member.isCurrentUser) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surface
-            },
-            shape = RoundedCornerShape(10.dp),
+            color = if (member.isCurrentUser) DxCirclePinkLight else Color(0xFFE2F5FC),
+            shape = RoundedCornerShape(4.dp),
+            border = BorderStroke(1.dp, DxCircleBlueDark),
         ) {
             Row(
                 modifier = Modifier.padding(9.dp),
@@ -3019,11 +3292,17 @@ private fun CircleMemberPage(circle: CircleData) {
                         )
                     }
                 }
-                Text(
-                    "${formatCount(member.points)} PT",
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                Surface(
+                    color = DxCirclePink,
+                    shape = RoundedCornerShape(50),
+                ) {
+                    Text(
+                        "${formatCount(member.points)} PT",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        fontWeight = FontWeight.Black,
+                        color = Color.White,
+                    )
+                }
             }
         }
     }
@@ -3046,22 +3325,29 @@ private fun CircleStructuredPage(page: CirclePageInfo) {
         )
     }
     if (page.items.isEmpty()) {
-        CirclePageEmptyState(
-            when (page.type) {
-                CirclePageType.INVITE_ACCEPT -> "There are no pending circle invitations or join requests."
-                CirclePageType.FESTA -> "There is no active Circle Festa information."
-                CirclePageType.CHALLENGE_RANKING -> "No Circle Challenge ranking is available yet."
-                CirclePageType.RANKING -> "No circle ranking entries are available."
-                else -> "DX NET did not expose structured information for this section."
-            },
-        )
+        val message = page.text.takeIf(String::isNotBlank) ?: when (page.type) {
+            CirclePageType.SEARCH ->
+                "Enter a circle code or browse recruiting circles on DX NET."
+            CirclePageType.INVITE_ACCEPT ->
+                "Circles that have invited you will be displayed here."
+            CirclePageType.FESTA,
+            CirclePageType.FESTA_RANKING,
+            -> "Outside Circle Festa period. Please wait for the next event."
+            CirclePageType.CHALLENGE_RANKING ->
+                "No Circle Challenge ranking is available yet."
+            CirclePageType.RANKING -> "No circle ranking entries are available."
+            CirclePageType.LEAVE -> "Leave the circle?"
+            else -> "No information is available for this page."
+        }
+        CirclePageEmptyState(message)
         return
     }
-    page.items.take(30).forEachIndexed { index, item ->
+    page.items.take(100).forEachIndexed { index, item ->
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(10.dp),
+            color = Color.White,
+            shape = RoundedCornerShape(4.dp),
+            border = BorderStroke(1.dp, DxCircleInk),
         ) {
             Row(
                 modifier = Modifier.padding(9.dp),
@@ -3108,8 +3394,9 @@ private fun CircleStructuredPage(page: CirclePageInfo) {
 private fun CirclePageEmptyState(message: String) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-        shape = RoundedCornerShape(10.dp),
+        color = Color.White,
+        shape = RoundedCornerShape(6.dp),
+        border = BorderStroke(2.dp, DxCircleBlue),
     ) {
         Text(
             message,
@@ -3122,12 +3409,17 @@ private fun CirclePageEmptyState(message: String) {
 
 @Composable
 private fun CircleSectionHeading(title: String, subtitle: String) {
-    Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Column(
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        CircleWebTitle(title)
         Text(
             subtitle,
+            modifier = Modifier.fillMaxWidth(),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = DxCircleInk,
+            textAlign = TextAlign.Center,
         )
     }
 }
@@ -3162,8 +3454,9 @@ private fun PointTrendCard(title: String, points: List<Pair<String, Int>>) {
     val first = values.first()
     val latest = values.last()
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(2.dp, DxCircleBlueDark),
+        shape = RoundedCornerShape(8.dp),
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3172,7 +3465,7 @@ private fun PointTrendCard(title: String, points: List<Pair<String, Int>>) {
                     formatCount(latest),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = DxCirclePink,
                 )
                 if (latest != first) {
                     Text(
@@ -3332,7 +3625,7 @@ internal fun ScoreStatsDialog(
                             fontWeight = FontWeight.Black,
                         )
                         Text(
-                            "${summary.playedCharts} matched scores · exact best medals",
+                            "${summary.playedCharts} matched scores",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -3353,14 +3646,6 @@ internal fun ScoreStatsDialog(
                     item(key = "bests") {
                         BestScoresCard(summary, onChart)
                     }
-                    item(key = "count-guidance") {
-                        Text(
-                            "Counts are exact; higher medals are not counted again in lower rows.",
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                     summary.levelTables.forEachIndexed { index, table ->
                         item(key = "standard-levels-$index") {
                             MedalTableCard(
@@ -3375,7 +3660,6 @@ internal fun ScoreStatsDialog(
                             table = summary.utage,
                             expanded = expandedTables[summary.utage.title],
                             onExpandedChange = { expandedTables[summary.utage.title] = it },
-                            note = "UTAGE uses estimated levels from the catalog; * means unrated.",
                         )
                     }
                 }
@@ -3478,7 +3762,6 @@ private fun MedalTableCard(
     table: MedalLevelTable,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
-    note: String? = null,
 ) {
     val fitsWidth = table.levels.size <= 6
     val scrollState = rememberScrollState()
@@ -3562,14 +3845,6 @@ private fun MedalTableCard(
                         }
                         Spacer(Modifier.height(2.dp))
                     }
-                }
-                note?.let {
-                    Text(
-                        it,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
         }

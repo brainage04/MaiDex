@@ -145,12 +145,18 @@ data class CircleInfoItem(
 
 enum class CirclePageType {
     PROFILE,
-    INVITE_ACCEPT,
-    FESTA,
-    CHALLENGE_RANKING,
     POINT_REWARD,
     RANKING,
+    RANKING_RULE,
+    CHALLENGE_RANKING,
     MEMBER,
+    SEARCH,
+    SEARCH_RESULTS,
+    INVITE_ACCEPT,
+    FESTA,
+    FESTA_RANKING,
+    FESTA_HISTORY,
+    LEAVE,
     OTHER,
 }
 

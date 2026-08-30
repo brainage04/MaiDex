@@ -13,6 +13,7 @@ import io.github.brainage04.maidex.data.CircleData
 import io.github.brainage04.maidex.data.ChartSort
 import io.github.brainage04.maidex.data.ConstantAvailability
 import io.github.brainage04.maidex.data.SortOrder
+import io.github.brainage04.maidex.data.FilterPreset
 import io.github.brainage04.maidex.data.FilterOptions
 import io.github.brainage04.maidex.data.SongChart
 import io.github.brainage04.maidex.data.PlayDetail
@@ -25,6 +26,7 @@ import io.github.brainage04.maidex.network.MaimaiDxClient
 import io.github.brainage04.maidex.rating.RatingCalculator
 import io.github.brainage04.maidex.data.normalizeSearch
 import io.github.brainage04.maidex.tracking.CircleTrackingScheduler
+import io.github.brainage04.maidex.data.builtInFilterPresets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +36,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = CatalogRepository(application)
@@ -51,6 +54,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val circleSnapshots = MutableStateFlow<List<CircleDailySnapshot>>(emptyList())
     private val playCountSnapshots = MutableStateFlow<List<PlayCountSnapshot>>(emptyList())
     private val trackingSettings = MutableStateFlow(TrackingSettings())
+    private val customFilterPresets = MutableStateFlow<List<FilterPreset>>(emptyList())
 
     private val trackingData = combine(
         circleHistory,
@@ -93,6 +97,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         return cachedRating
     }
+
+    val filterPresets: StateFlow<List<FilterPreset>> = combine(snapshot, customFilterPresets) {
+            loaded,
+            custom,
+        ->
+        builtInFilterPresets(loaded?.options?.versions?.firstOrNull()) + custom
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = builtInFilterPresets(null),
+    )
 
     val uiState: StateFlow<CatalogUiState> = combine(snapshot, filters, sorting, error, playerData) {
             loaded,
@@ -163,6 +178,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 scores.value = userRepository.loadScores()
                 playDetails.value = userRepository.loadPlayDetails()
                 profile.value = userRepository.loadProfile()
+                customFilterPresets.value = userRepository.loadFilterPresets()
             }
             reloadTrackingData()
             if (profile.value != null) {
@@ -175,8 +191,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         filters.value = filters.value.copy(search = value)
     }
 
-    fun applyFilters(value: ChartFilters) {
+    fun applyFilters(value: ChartFilters, sort: ChartSort, sortOrder: SortOrder) {
         filters.value = value
+        sorting.value = Sorting(sort, sortOrder)
+    }
+
+    fun saveFilterPreset(
+        name: String,
+        value: ChartFilters,
+        sort: ChartSort,
+        sortOrder: SortOrder,
+    ) {
+        val trimmedName = name.trim()
+        if (trimmedName.isEmpty()) return
+        viewModelScope.launch {
+            val preset = FilterPreset(
+                id = UUID.randomUUID().toString(),
+                name = trimmedName,
+                filters = value.copy(search = ""),
+                sort = sort,
+                sortOrder = sortOrder,
+            )
+            customFilterPresets.value = withContext(Dispatchers.IO) {
+                userRepository.saveFilterPreset(preset)
+                userRepository.loadFilterPresets()
+            }
+        }
+    }
+
+    fun deleteFilterPreset(id: String) {
+        viewModelScope.launch {
+            customFilterPresets.value = withContext(Dispatchers.IO) {
+                userRepository.deleteFilterPreset(id)
+                userRepository.loadFilterPresets()
+            }
+        }
     }
 
     fun clearFilters() {
@@ -197,7 +246,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
 
-    fun importAccount(region: AccountRegion) {
+    fun importData(region: AccountRegion) {
         val charts = snapshot.value?.charts ?: return
         if (importStatus.value is ImportStatus.Running) return
         viewModelScope.launch {

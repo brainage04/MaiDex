@@ -86,6 +86,42 @@ class UserDataRepositoryTest {
         }
     }
 
+    @Test
+    fun filterPresetsPersistIndependentlyFromImportedAccountData() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repository = UserDataRepository(context)
+        val preset = FilterPreset(
+            id = "instrumentation-preset",
+            name = "My level 14",
+            filters = ChartFilters(
+                search = "must not persist",
+                minLevel = 14.0,
+                categories = setOf("POPS & ANIME"),
+                comboMedals = setOf(ComboMedal.AP, ComboMedal.AP_PLUS),
+                scoredOnly = true,
+            ),
+            sort = ChartSort.ACHIEVEMENT,
+            sortOrder = SortOrder.DESCENDING,
+        )
+        repository.deleteFilterPreset(preset.id)
+        try {
+            repository.saveFilterPreset(preset.copy(filters = preset.filters.copy(search = "")))
+
+            val reloaded = UserDataRepository(context).loadFilterPresets().single {
+                it.id == preset.id
+            }
+            assertEquals(preset.copy(filters = preset.filters.copy(search = "")), reloaded)
+
+            repository.clear()
+            assertEquals(
+                preset.id,
+                UserDataRepository(context).loadFilterPresets().single { it.id == preset.id }.id,
+            )
+        } finally {
+            repository.deleteFilterPreset(preset.id)
+        }
+    }
+
     private fun progressProfile(
         completedChihos: Set<String> = emptySet(),
         friendClass: String = "",

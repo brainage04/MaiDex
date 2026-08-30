@@ -1,7 +1,11 @@
 package io.github.brainage04.maidex.network
 
 import io.github.brainage04.maidex.data.AccountRegion
+import io.github.brainage04.maidex.data.CirclePageInfo
 import io.github.brainage04.maidex.data.CirclePageType
+import io.github.brainage04.maidex.data.NoteCounts
+import io.github.brainage04.maidex.data.Regions
+import io.github.brainage04.maidex.data.SongChart
 import org.jsoup.Jsoup
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -229,6 +233,46 @@ class MaimaiDxClientTest {
     }
 
     @Test
+    fun `circle parser preserves every recognized read only page`() {
+        fun page(path: String, title: String = "", text: String = "") = Jsoup.parse(
+            """
+            <main class="main_wrapper">
+              ${if (title.isBlank()) "" else """<img class="title" src="/img/circle/title/$title.png">"""}
+              $text
+            </main>
+            """.trimIndent(),
+            "https://maimaidx-eng.com/maimai-mobile/circle/$path",
+        )
+        val documents = listOf(
+            page("profile/", "title_circle_profile", """<div class="circle_name_block">Test Circle</div>"""),
+            page("circleSearch/", "title_circle_serach"),
+            page("circleSearch/find/", "title_circle_serach", "Recruiting circle"),
+            page("festa/festaRanking", text = "Festa ranking"),
+            page("festa/festaHistory", text = "Past Festa"),
+            page("circleRankingRule/", "title_circle_ranking_rule", "Ranking rules"),
+            page("circleLeave/", "title_circle_leave", "Leave the Circle?"),
+        )
+
+        val types = extractCircleData(documents, "Player", importedAt = 123L)!!
+            .pages
+            .map(CirclePageInfo::type)
+            .toSet()
+
+        assertEquals(
+            setOf(
+                CirclePageType.PROFILE,
+                CirclePageType.SEARCH,
+                CirclePageType.SEARCH_RESULTS,
+                CirclePageType.FESTA_RANKING,
+                CirclePageType.FESTA_HISTORY,
+                CirclePageType.RANKING_RULE,
+                CirclePageType.LEAVE,
+            ),
+            types,
+        )
+    }
+
+    @Test
     fun `circle parser returns null when DX NET says the player has no circle`() {
         val document = Jsoup.parse(
             """<main class="main_wrapper">You are currently not in a circle.</main>""",
@@ -237,4 +281,60 @@ class MaimaiDxClientTest {
         assertEquals(null, extractCircleData(listOf(document), "Player", importedAt = 123L))
     }
 
+    @Test
+    fun `utage lookup matches catalog mode labels to generic DX NET difficulty`() {
+        val chart = testChart(
+            title = "宴のテスト",
+            type = "utage",
+            difficulty = "【宴】",
+            level = "13?",
+        )
+
+        assertEquals(chart, ChartLookup(listOf(chart)).find("宴のテスト", "utage", "utage", "13"))
+    }
+
+    @Test
+    fun `utage lookup does not guess between indistinguishable variants`() {
+        val variants = listOf(
+            testChart("Garakuta Doll Play", "utage", "【宴】", "*", id = 1),
+            testChart("Garakuta Doll Play", "utage", "【宴】", "*", id = 2),
+        )
+
+        assertEquals(null, ChartLookup(variants).find("Garakuta Doll Play", "utage", "utage", "*"))
+    }
+
 }
+
+private fun testChart(
+    title: String,
+    type: String,
+    difficulty: String,
+    level: String,
+    id: Long = 1,
+) = SongChart(
+    id = id,
+    chartKey = "chart-$id",
+    sourceSongId = "song-$id",
+    category = "",
+    title = title,
+    titleRomanized = "",
+    titleAliases = "",
+    artist = "",
+    artistRomanized = "",
+    bpm = null,
+    imageUrl = "",
+    songVersion = "",
+    releaseDate = null,
+    comment = null,
+    type = type,
+    difficulty = difficulty,
+    level = level,
+    levelValue = null,
+    constant = null,
+    noteDesigner = null,
+    noteDesignerRomanized = "",
+    noteCounts = NoteCounts(null, null, null, null, null, null),
+    regions = Regions(false, false, false, false),
+    chartVersion = null,
+    isSpecial = type == "utage",
+)

@@ -37,6 +37,7 @@ import java.net.URI
 import java.time.YearMonth
 import java.time.ZoneId
 import java.util.Locale
+import java.util.ArrayDeque
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -225,41 +226,43 @@ class MaimaiDxClient(
 
     private suspend fun getCircleDocuments(region: AccountRegion): List<Document> {
         val main = getDocument(region, "/maimai-mobile/circle/")
-        val linkedUrls = linkedSetOf<String>()
-        main.select("a[href]").forEach { link ->
-            link.absUrl("href").takeIf(String::isNotBlank)?.let(linkedUrls::add)
-        }
-        main.select("form[action]").forEach { form ->
-            if (!form.attr("method").equals("post", ignoreCase = true)) {
-                form.absUrl("action").takeIf(String::isNotBlank)?.let(linkedUrls::add)
-            }
-        }
-        Regex("""location(?:\.href)?\s*=\s*['"]([^'"]+)['"]""")
-            .findAll(main.html())
-            .map { match -> URI(main.location()).resolve(match.groupValues[1]).toString() }
-            .forEach(linkedUrls::add)
+        val documents = mutableListOf(main)
+        val discovered = linkedSetOf(main.location().substringBefore('#'))
+        val queued = ArrayDeque<String>()
 
-        val safeUrls = linkedUrls.asSequence()
-            .filter { url -> url.startsWith("${region.baseUrl}/maimai-mobile/circle") }
-            .filterNot {
-                it.substringBefore('?').trimEnd('/') ==
-                    main.location().substringBefore('?').trimEnd('/')
-            }
-            .filterNot(::isCircleMutationUrl)
-            .distinct()
-            .take(12)
-            .toList()
-        val semaphore = Semaphore(MAX_CONCURRENT_DX_NET_REQUESTS)
-        val safePages = coroutineScope {
-            safeUrls.map { url ->
-                async {
-                    semaphore.withPermit {
-                        runCatching { getDocument(region, url) }.getOrNull()
-                    }
+        fun discover(document: Document) {
+            circleLinkedUrls(document)
+                .filter { url -> isSafeCircleReadUrl(url, region) }
+                .forEach { url ->
+                    val normalized = url.substringBefore('#')
+                    if (discovered.add(normalized)) queued.addLast(normalized)
                 }
-            }.awaitAll().filterNotNull()
         }
-        return listOf(main) + safePages
+
+        discover(main)
+        while (queued.isNotEmpty() && documents.size < MAX_CIRCLE_DOCUMENTS) {
+            val batch = buildList {
+                repeat(
+                    minOf(
+                        MAX_CONCURRENT_DX_NET_REQUESTS,
+                        queued.size,
+                        MAX_CIRCLE_DOCUMENTS - documents.size,
+                    ),
+                ) {
+                    add(queued.removeFirst())
+                }
+            }
+            val loaded = coroutineScope {
+                batch.map { url ->
+                    async { runCatching { getDocument(region, url) }.getOrNull() }
+                }.awaitAll()
+            }
+            loaded.filterNotNull().forEach { document ->
+                documents += document
+                discover(document)
+            }
+        }
+        return documents
     }
 
     private fun getDocument(region: AccountRegion, path: String): Document {
@@ -394,6 +397,7 @@ class MaimaiDxClient(
 
     private companion object {
         const val MAX_CONCURRENT_DX_NET_REQUESTS = 3
+        const val MAX_CIRCLE_DOCUMENTS = 24
     }
 }
 data class AccountSyncResult(
@@ -406,22 +410,37 @@ private data class ScoreImportResult(
     val unmatched: Int,
 )
 
-private fun isCircleMutationUrl(url: String): Boolean {
-    val value = url.lowercase(Locale.ROOT)
+private fun circleLinkedUrls(document: Document): List<String> = buildList {
+    document.select("a[href]").forEach { link ->
+        link.absUrl("href").takeIf(String::isNotBlank)?.let(::add)
+    }
+    document.select("form[action]").forEach { form ->
+        if (!form.attr("method").equals("post", ignoreCase = true)) {
+            form.absUrl("action").takeIf(String::isNotBlank)?.let(::add)
+        }
+    }
+    Regex("""location(?:\.href)?\s*=\s*['"]([^'"]+)['"]""")
+        .findAll(document.html())
+        .map { match -> URI(document.location()).resolve(match.groupValues[1]).toString() }
+        .forEach(::add)
+}.distinct()
+
+private fun isSafeCircleReadUrl(url: String, region: AccountRegion): Boolean {
+    if (!url.startsWith("${region.baseUrl}/maimai-mobile/circle")) return false
+    val path = runCatching { URI(url).path.lowercase(Locale.ROOT) }.getOrNull() ?: return false
+    if (listOf("/confirm/", "/complete/", "/result/").any(path::contains)) return false
+    val root = "/maimai-mobile/circle/"
+    if (path == root) return true
     return listOf(
-        "create",
-        "edit",
-        "save",
-        "update",
-        "join",
-        "leave",
-        "withdraw",
-        "disband",
-        "delete",
-        "transfer",
-        "recruit",
-        "search",
-    ).any(value::contains)
+        "${root}circlesearch/",
+        "${root}circleaccept/",
+        "${root}festa",
+        "${root}circlechallengeranking/",
+        "${root}circlepointreward/",
+        "${root}circleranking/",
+        "${root}circlemember/",
+        "${root}circleleave/",
+    ).any(path::startsWith)
 }
 
 internal fun extractCircleData(
@@ -543,7 +562,12 @@ internal fun extractCircleData(
 
     val pages = documents
         .map(::extractCirclePageInfo)
-        .filter { page -> page.text.isNotBlank() || page.items.isNotEmpty() || page.imageUrls.isNotEmpty() }
+        .filter { page ->
+            page.type != CirclePageType.OTHER ||
+                page.text.isNotBlank() ||
+                page.items.isNotEmpty() ||
+                page.imageUrls.isNotEmpty()
+        }
         .distinctBy { page -> page.type to page.title }
 
     val members = extractCircleMembers(documents, playerName)
@@ -730,12 +754,18 @@ private fun circlePageTitle(document: Document): String {
     val type = circlePageType(document)
     return when (type) {
         CirclePageType.PROFILE -> "Circle profile"
-        CirclePageType.INVITE_ACCEPT -> "Circle invitations"
-        CirclePageType.FESTA -> "Circle Festa"
-        CirclePageType.CHALLENGE_RANKING -> "Circle Challenge ranking"
         CirclePageType.POINT_REWARD -> "Circle point rewards"
         CirclePageType.RANKING -> "Circle ranking"
+        CirclePageType.RANKING_RULE -> "Circle ranking rules"
+        CirclePageType.CHALLENGE_RANKING -> "Circle Challenge ranking"
         CirclePageType.MEMBER -> "Circle members"
+        CirclePageType.SEARCH -> "Search circles"
+        CirclePageType.SEARCH_RESULTS -> "Recruiting circles"
+        CirclePageType.INVITE_ACCEPT -> "Circle invitations"
+        CirclePageType.FESTA -> "Circle Festa"
+        CirclePageType.FESTA_RANKING -> "Circle Festa ranking"
+        CirclePageType.FESTA_HISTORY -> "Past Circle Festa"
+        CirclePageType.LEAVE -> "Leave circle"
         CirclePageType.OTHER -> circlePageKey(document)
             .removePrefix("circle_")
             .split('_')
@@ -754,16 +784,24 @@ private fun circlePageTitle(document: Document): String {
 }
 
 private fun circlePageType(document: Document): CirclePageType {
+    val path = runCatching { URI(document.location()).path.lowercase(Locale.ROOT) }.getOrDefault("")
     val key = circlePageKey(document)
         .replace("_", "")
         .replace("-", "")
         .lowercase(Locale.ROOT)
     return when {
+        "/circlesearch/find/" in path -> CirclePageType.SEARCH_RESULTS
+        "/festa/festaranking" in path -> CirclePageType.FESTA_RANKING
+        "/festa/festahistory" in path -> CirclePageType.FESTA_HISTORY
         "circlechallenge" in key && "ranking" in key -> CirclePageType.CHALLENGE_RANKING
-        "inviteaccept" in key || "invitation" in key -> CirclePageType.INVITE_ACCEPT
+        "rankingrule" in key -> CirclePageType.RANKING_RULE
         "pointreward" in key || ("reward" in key && "circle" in key) -> CirclePageType.POINT_REWARD
+        "festahistory" in key -> CirclePageType.FESTA_HISTORY
         "festa" in key -> CirclePageType.FESTA
-        "profile" in key -> CirclePageType.PROFILE
+        "circlesearch" in key || "circleserach" in key -> CirclePageType.SEARCH
+        "inviteaccept" in key || "invitation" in key -> CirclePageType.INVITE_ACCEPT
+        "leave" in key -> CirclePageType.LEAVE
+        key == "circle" || "profile" in key -> CirclePageType.PROFILE
         "member" in key -> CirclePageType.MEMBER
         "ranking" in key -> CirclePageType.RANKING
         else -> CirclePageType.OTHER
@@ -792,7 +830,9 @@ private fun extractCirclePageInfo(document: Document): CirclePageInfo {
         ".circle_member_block",
         ".circle_member_row",
         "[class*=ranking_block]",
-        "[class*=rank_block]",
+        ".ranking_top_inner_block",
+        ".ranking_inner_block",
+        ".circle_profile_circle_name",
         "[class*=reward_block]",
         "[class*=circle_reward]",
         "[class*=festa_block]",
@@ -801,27 +841,40 @@ private fun extractCirclePageInfo(document: Document): CirclePageInfo {
         ".see_through_block",
     ).joinToString(", ")
     val items = content.select(itemSelector).mapNotNull { block ->
-        val text = block.text().normalizedWhitespace()
+        if (
+            block.classNames().any { it == "ranking_block" } &&
+            block.selectFirst(".ranking_top_inner_block, .ranking_inner_block") != null
+        ) {
+            return@mapNotNull null
+        }
+        val isRecruitingCircle = block.hasClass("circle_profile_circle_name")
+        val isRankingRow = block.hasClass("ranking_top_inner_block") ||
+            block.hasClass("ranking_inner_block")
+        val source = if (isRecruitingCircle) block.parent() ?: block else block
+        val text = source.text().normalizedWhitespace()
         if (text.isBlank() || text.length > 500) return@mapNotNull null
-        val imageUrl = block.selectFirst("img[src]").imageUrl()
+        val imageUrl = source.selectFirst("img[src]").imageUrl()
             .takeIf(::isUsefulCirclePageImage)
             .orEmpty()
-        val cells = if (block.tagName() == "tr") {
-            block.children().filter { child -> child.tagName() == "th" || child.tagName() == "td" }
+        val cells = if (source.tagName() == "tr") {
+            source.children().filter { child -> child.tagName() == "th" || child.tagName() == "td" }
         } else {
             emptyList()
         }
-        val label = if (cells.size >= 2) {
-            cells.first().text().normalizedWhitespace()
-        } else {
-            block.selectFirst(
+        val label = when {
+            isRecruitingCircle -> block.text().normalizedWhitespace()
+            isRankingRow -> source.selectFirst(".f_l.p_t_10")?.text()?.normalizedWhitespace().orEmpty()
+            cells.size >= 2 -> cells.first().text().normalizedWhitespace()
+            else -> source.selectFirst(
                 "[class*=name], [class*=title], [class*=header], h1, h2, h3, strong, b",
             )?.text()?.normalizedWhitespace().orEmpty()
         }.ifBlank { text }
-        val value = if (cells.size >= 2) {
-            cells.drop(1).joinToString(" ") { cell -> cell.text().normalizedWhitespace() }
-        } else {
-            text.removePrefix(label).trim(' ', ':', '：', '-', '·')
+        val value = when {
+            isRankingRow ->
+                source.selectFirst(".f_r.f_14")?.text()?.normalizedWhitespace().orEmpty()
+            cells.size >= 2 ->
+                cells.drop(1).joinToString(" ") { cell -> cell.text().normalizedWhitespace() }
+            else -> text.removePrefix(label).trim(' ', ':', '：', '-', '·')
         }
         CirclePageItem(label = label, value = value, imageUrl = imageUrl)
     }.distinctBy { item -> Triple(item.label, item.value, item.imageUrl) }
@@ -993,16 +1046,28 @@ internal fun extractRecentTitle(titleElement: Element): String =
 
 class AuthenticationRequiredException(message: String) : IllegalStateException(message)
 
-private class ChartLookup(charts: List<SongChart>) {
+internal class ChartLookup(charts: List<SongChart>) {
     private val exact = charts.associateBy {
         matchKey(it.title, it.type, it.difficulty, it.level.orEmpty())
     }
     private val withoutLevel = charts.groupBy {
         matchKey(it.title, it.type, it.difficulty, "")
     }
+    private val utageByTitleAndLevel = charts
+        .filter { it.type == "utage" }
+        .groupBy { matchKey(it.title, it.type, "", it.level.orEmpty()) }
+    private val utageByTitle = charts
+        .filter { it.type == "utage" }
+        .groupBy { matchKey(it.title, it.type, "", "") }
 
     fun find(title: String, type: String, difficulty: String, level: String): SongChart? =
         exact[matchKey(title, type, difficulty, level)]
+            ?: if (type == "utage") {
+                utageByTitleAndLevel[matchKey(title, type, "", level)]?.singleOrNull()
+                    ?: utageByTitle[matchKey(title, type, "", "")]?.singleOrNull()
+            } else {
+                null
+            }
             ?: withoutLevel[matchKey(title, type, difficulty, "")]?.singleOrNull()
 }
 

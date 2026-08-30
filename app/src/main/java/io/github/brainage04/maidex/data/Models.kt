@@ -209,6 +209,78 @@ enum class SortOrder(val label: String) {
     DESCENDING("Descending"),
 }
 
+data class FilterPreset(
+    val id: String,
+    val name: String,
+    val filters: ChartFilters,
+    val sort: ChartSort,
+    val sortOrder: SortOrder,
+    val isBuiltIn: Boolean = false,
+)
+
+fun builtInFilterPresets(latestVersion: String?): List<FilterPreset> = listOf(
+    FilterPreset(
+        id = "latest-version",
+        name = "Latest version",
+        filters = ChartFilters(versions = latestVersion?.let(::setOf).orEmpty()),
+        sort = ChartSort.RELEASE,
+        sortOrder = SortOrder.DESCENDING,
+        isBuiltIn = true,
+    ),
+    FilterPreset(
+        id = "level-13-ap",
+        name = "13 AP or above",
+        filters = ChartFilters(
+            minLevel = 13.0,
+            comboMedals = setOf(ComboMedal.AP, ComboMedal.AP_PLUS),
+        ),
+        sort = ChartSort.ACHIEVEMENT,
+        sortOrder = SortOrder.DESCENDING,
+        isBuiltIn = true,
+    ),
+    FilterPreset(
+        id = "level-13-plus-ap",
+        name = "13+ AP or above",
+        filters = ChartFilters(
+            minLevel = 13.6,
+            comboMedals = setOf(ComboMedal.AP, ComboMedal.AP_PLUS),
+        ),
+        sort = ChartSort.ACHIEVEMENT,
+        sortOrder = SortOrder.DESCENDING,
+        isBuiltIn = true,
+    ),
+    FilterPreset(
+        id = "level-14-ap",
+        name = "14 AP or above",
+        filters = ChartFilters(
+            minLevel = 14.0,
+            comboMedals = setOf(ComboMedal.AP, ComboMedal.AP_PLUS),
+        ),
+        sort = ChartSort.ACHIEVEMENT,
+        sortOrder = SortOrder.DESCENDING,
+        isBuiltIn = true,
+    ),
+    FilterPreset(
+        id = "level-14-plus-sss-plus",
+        name = "14+ SSS+ or above",
+        filters = ChartFilters(
+            minLevel = 14.6,
+            grades = setOf(Grade.SSS_PLUS),
+        ),
+        sort = ChartSort.ACHIEVEMENT,
+        sortOrder = SortOrder.DESCENDING,
+        isBuiltIn = true,
+    ),
+    FilterPreset(
+        id = "level-15",
+        name = "15",
+        filters = ChartFilters(minLevel = 15.0, maxLevel = 15.0),
+        sort = ChartSort.ACHIEVEMENT,
+        sortOrder = SortOrder.DESCENDING,
+        isBuiltIn = true,
+    ),
+)
+
 data class CatalogInfo(
     val updateTime: String,
     val songCount: Int,

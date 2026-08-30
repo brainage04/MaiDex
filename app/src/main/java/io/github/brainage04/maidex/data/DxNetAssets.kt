@@ -46,6 +46,27 @@ internal object DxNetAssets {
         else -> ""
     }
 
+    fun circleTitleImageUrl(type: CirclePageType): String = when (type) {
+        CirclePageType.PROFILE -> "$IMAGE_ROOT/circle/title/title_circle_profile.png"
+        CirclePageType.POINT_REWARD -> "$IMAGE_ROOT/circle/title/title_circle_point_reward.png"
+        CirclePageType.RANKING -> "$IMAGE_ROOT/circle/title/title_circle_ranking.png"
+        CirclePageType.RANKING_RULE -> "$IMAGE_ROOT/circle/title/title_circle_ranking_rule.png"
+        CirclePageType.CHALLENGE_RANKING ->
+            "$IMAGE_ROOT/circle/title/title_circle_circlechallenge_ranking.png"
+        CirclePageType.MEMBER -> "$IMAGE_ROOT/circle/title/title_circle_member.png"
+        CirclePageType.SEARCH,
+        CirclePageType.SEARCH_RESULTS,
+        -> "$IMAGE_ROOT/circle/title/title_circle_serach.png"
+        CirclePageType.INVITE_ACCEPT ->
+            "$IMAGE_ROOT/circle/title/title_circle_invite_accept.png"
+        CirclePageType.FESTA,
+        CirclePageType.FESTA_RANKING,
+        -> "$IMAGE_ROOT/circle/title/title_circle_festa.png"
+        CirclePageType.FESTA_HISTORY -> ""
+        CirclePageType.LEAVE -> "$IMAGE_ROOT/circle/title/title_circle_leave.png"
+        CirclePageType.OTHER -> ""
+    }
+
     fun dxStarIconUrl(stars: Int): String =
         stars.takeIf { it in 1..5 }
             ?.let { "$IMAGE_ROOT/playlog/dxstar_$it.png?ver=$ASSET_VERSION" }

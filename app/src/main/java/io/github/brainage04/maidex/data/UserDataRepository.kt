@@ -13,6 +13,8 @@ import java.time.ZoneId
 class UserDataRepository(context: Context) {
     private val helper = UserDatabase(context)
     private val preferences = context.getSharedPreferences("player-profile", Context.MODE_PRIVATE)
+    private val filterPreferences =
+        context.getSharedPreferences("filter-presets", Context.MODE_PRIVATE)
     private val profileAssetCache = ProfileAssetCache(File(context.filesDir, "profile-assets"))
 
     fun loadScores(): Map<String, UserScore> = helper.readableDatabase.rawQuery(
@@ -127,6 +129,30 @@ class UserDataRepository(context: Context) {
         }
     }
 
+
+    fun loadFilterPresets(): List<FilterPreset> = runCatching {
+        JSONArray(filterPreferences.getString("presets", "[]").orEmpty())
+            .objects()
+            .mapNotNull(::decodeFilterPreset)
+    }.getOrDefault(emptyList())
+
+    fun saveFilterPreset(preset: FilterPreset) {
+        val updated = loadFilterPresets().filterNot { it.id == preset.id } + preset.copy(isBuiltIn = false)
+        filterPreferences.edit()
+            .putString("presets", JSONArray().apply {
+                updated.forEach { put(encodeFilterPreset(it)) }
+            }.toString())
+            .apply()
+    }
+
+    fun deleteFilterPreset(id: String) {
+        val updated = loadFilterPresets().filterNot { it.id == id }
+        filterPreferences.edit()
+            .putString("presets", JSONArray().apply {
+                updated.forEach { put(encodeFilterPreset(it)) }
+            }.toString())
+            .apply()
+    }
     fun loadTrackingSettings(): TrackingSettings = TrackingSettings(
         lastAttemptAt = preferences.getLong("tracking_last_attempt_at", 0L),
         lastSuccessAt = preferences.getLong("tracking_last_success_at", 0L),
@@ -172,6 +198,7 @@ class UserDataRepository(context: Context) {
             saveTrackingRows(profile, result.circle)
         }
         saveProfile(profile)
+        recordTrackingSuccess()
         return profile
     }
 
@@ -494,6 +521,7 @@ private fun decodeCircle(value: String): CircleData {
                 },
                 items = page.optJSONArray("items").objects().map { item ->
                     CirclePageItem(
+
                         label = item.optString("label"),
                         value = item.optString("value"),
                         imageUrl = item.optString("imageUrl"),
@@ -505,14 +533,88 @@ private fun decodeCircle(value: String): CircleData {
         importedAt = root.optLong("importedAt"),
     )
 }
+private fun encodeFilterPreset(preset: FilterPreset): JSONObject = JSONObject().apply {
+    put("id", preset.id)
+    put("name", preset.name)
+    put("sort", preset.sort.name)
+    put("sortOrder", preset.sortOrder.name)
+    put("filters", JSONObject().apply {
+        val filters = preset.filters
+        put("artist", filters.artist)
+        put("noteDesigner", filters.noteDesigner)
+        put("categories", JSONArray(filters.categories.toList()))
+        put("difficulties", JSONArray(filters.difficulties.toList()))
+        put("versions", JSONArray(filters.versions.toList()))
+        put("types", JSONArray(filters.types.toList()))
+        put("showUtage", filters.showUtage)
+        put("regions", JSONArray(filters.regions.toList()))
+        filters.minLevel?.let { put("minLevel", it) }
+        filters.maxLevel?.let { put("maxLevel", it) }
+        filters.minBpm?.let { put("minBpm", it) }
+        filters.maxBpm?.let { put("maxBpm", it) }
+        put("constantAvailability", filters.constantAvailability.name)
+        put("grades", JSONArray(filters.grades.map(Grade::name)))
+        put("comboMedals", JSONArray(filters.comboMedals.map(ComboMedal::name)))
+        put("syncMedals", JSONArray(filters.syncMedals.map(SyncMedal::name)))
+        put("scoredOnly", filters.scoredOnly)
+    })
+}
+
+private fun decodeFilterPreset(root: JSONObject): FilterPreset? {
+    val id = root.optString("id").takeIf(String::isNotBlank) ?: return null
+    val name = root.optString("name").takeIf(String::isNotBlank) ?: return null
+    val filters = root.optJSONObject("filters") ?: return null
+    return FilterPreset(
+        id = id,
+        name = name,
+        filters = ChartFilters(
+            artist = filters.optString("artist"),
+            noteDesigner = filters.optString("noteDesigner"),
+            categories = filters.optJSONArray("categories").strings().toSet(),
+            difficulties = filters.optJSONArray("difficulties").strings().toSet(),
+            versions = filters.optJSONArray("versions").strings().toSet(),
+            types = filters.optJSONArray("types").strings().toSet(),
+            showUtage = filters.optBoolean("showUtage", true),
+            regions = filters.optJSONArray("regions").strings().toSet(),
+            minLevel = filters.optionalDouble("minLevel"),
+            maxLevel = filters.optionalDouble("maxLevel"),
+            minBpm = filters.optionalInt("minBpm"),
+            maxBpm = filters.optionalInt("maxBpm"),
+            constantAvailability = enumValueOr(
+                filters.optString("constantAvailability"),
+                ConstantAvailability.BOTH,
+            ),
+            grades = filters.optJSONArray("grades").enumSet<Grade>(),
+            comboMedals = filters.optJSONArray("comboMedals").enumSet<ComboMedal>(),
+            syncMedals = filters.optJSONArray("syncMedals").enumSet<SyncMedal>(),
+            scoredOnly = filters.optBoolean("scoredOnly"),
+        ),
+        sort = enumValueOr(root.optString("sort"), ChartSort.LEVEL),
+        sortOrder = enumValueOr(root.optString("sortOrder"), SortOrder.DESCENDING),
+    )
+}
+
+private fun JSONObject.optionalDouble(key: String): Double? =
+    if (has(key) && !isNull(key)) optDouble(key) else null
+
+private inline fun <reified T : Enum<T>> JSONArray?.enumSet(): Set<T> =
+    strings().mapNotNull { value ->
+        runCatching { enumValueOf<T>(value) }.getOrNull()
+    }.toSet()
 
 private fun circlePageTypeFromLegacyTitle(title: String): CirclePageType {
     val key = title.replace(Regex("""[^a-z]""", RegexOption.IGNORE_CASE), "").lowercase()
     return when {
         "circlechallenge" in key && "ranking" in key -> CirclePageType.CHALLENGE_RANKING
-        "inviteaccept" in key || "invitation" in key -> CirclePageType.INVITE_ACCEPT
+        "rankingrules" in key -> CirclePageType.RANKING_RULE
         "pointreward" in key -> CirclePageType.POINT_REWARD
+        "pastcirclefesta" in key -> CirclePageType.FESTA_HISTORY
+        "circlefestaranking" in key -> CirclePageType.FESTA_RANKING
         "festa" in key -> CirclePageType.FESTA
+        "searchcircle" in key -> CirclePageType.SEARCH
+        "recruitingcircles" in key -> CirclePageType.SEARCH_RESULTS
+        "inviteaccept" in key || "invitation" in key -> CirclePageType.INVITE_ACCEPT
+        "leavecircle" in key -> CirclePageType.LEAVE
         "profile" in key -> CirclePageType.PROFILE
         "member" in key -> CirclePageType.MEMBER
         "ranking" in key -> CirclePageType.RANKING
