@@ -10,8 +10,8 @@ MaiDex is an Android companion app for **maimai DX** players. It combines an off
 - Sort by level, title, rating, achievement, rank, DX score, release date, or BPM.
 - Import DX NET profile data, scores, medals, recent play history, and judgment details for Japan or International accounts.
 - Calculate chart ratings, total rating, rating milestones, achievement loss, and DX score loss.
-- View score statistics, medal tables, best scores, Dan course guides, Chiho/Class Battle unlock guides, and chart details.
-- Track circle history and play counts with an hourly background sync.
+- View score statistics, medal tables, best scores, Dan course guides for all 11 DX releases from Splash PLUS to CiRCLE PLUS (including regional substitutions), Chiho/Class Battle unlock guides, and chart details.
+- Track circle history and play counts with an hourly background sync; view read-only snapshots of the official Circle profile, points, challenge, Festa, reward, member, and ranking layouts.
 
 ## Architecture
 
@@ -92,6 +92,8 @@ tools/                Auxiliary development tools
 - DX NET requests require an authenticated session and network connectivity.
 - Removing imported account data clears local score, profile, tracking, and cached profile-asset data.
 - The DX NET parser depends on the structure of the official HTML pages and may require updates if those pages change.
+- Circle layouts retain official styles and image layers, with scripts, forms, account controls, and site navigation removed. Static assets are fetched without account cookies and cached; first viewing requires network access. Existing imports need one sync to capture these layouts.
+- DX NET session cookies are refreshed per response, including redirects. Expired sessions require sign-in again; a transport connection abort does not by itself indicate authentication expiry.
 
 ## CI direction
 

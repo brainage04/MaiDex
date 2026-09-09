@@ -448,6 +448,7 @@ private fun encodeCircle(circle: CircleData): String = JSONObject().apply {
             put(JSONObject().apply {
                 put("title", page.title)
                 put("text", page.text)
+                put("html", page.html)
                 put("type", page.type.name)
                 put("items", JSONArray().apply {
                     page.items.forEach { item ->
@@ -514,6 +515,7 @@ private fun decodeCircle(value: String): CircleData {
             CirclePageInfo(
                 title = title,
                 text = page.optString("text"),
+                html = page.optString("html"),
                 type = runCatching {
                     CirclePageType.valueOf(page.optString("type"))
                 }.getOrElse {

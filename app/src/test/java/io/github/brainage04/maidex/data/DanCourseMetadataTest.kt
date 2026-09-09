@@ -45,4 +45,49 @@ class DanCourseMetadataTest {
             DanCourseMetadata.chartKey(ura.track(1, AccountRegion.JAPAN)),
         )
     }
+
+    @Test
+    fun `historical courses retain their own charts and life bonuses`() {
+        val splashTenth = DanCourseMetadata.coursesForVersion("Splash PLUS").single { it.id == "tenth" }
+        assertEquals(
+            listOf(
+                DanTrack("天火明命", "std", "master"),
+                DanTrack("Ether Strike", "dx", "master"),
+                DanTrack("Lividi", "std", "master"),
+                DanTrack("VERTeX", "std", "master"),
+            ),
+            splashTenth.tracks,
+        )
+        assertEquals(20, splashTenth.life.trackBonus)
+        assertEquals(
+            50,
+            DanCourseMetadata.coursesForVersion("FESTiVAL").single { it.id == "tenth" }.life.trackBonus,
+        )
+        assertEquals(30, DanCourseMetadata.courses.single { it.id == "tenth" }.life.trackBonus)
+        assertTrue(DanCourseMetadata.coursesForVersion("UNiVERSE PLUS").none { it.group == DanCourseGroup.URA })
+        assertEquals(
+            "ura-kaiden",
+            DanCourseMetadata.coursesForVersion("FESTiVAL").single { it.group == DanCourseGroup.URA }.id,
+        )
+    }
+
+    @Test
+    fun `historical international substitutions do not alter Japanese courses`() {
+        val splashThird = DanCourseMetadata.coursesForVersion("Splash PLUS").single { it.id == "third" }
+        assertEquals(DanTrack("アゲアゲアゲイン", "std", "advanced"), splashThird.track(1, AccountRegion.JAPAN))
+        assertEquals(
+            DanTrack("囲い無き世は一期の月影", "std", "advanced"),
+            splashThird.track(1, AccountRegion.INTERNATIONAL),
+        )
+        assertEquals(
+            DanTrack("テレキャスタービーボーイ", "dx", "advanced"),
+            DanCourseMetadata.coursesForVersion("UNiVERSE PLUS")
+                .single { it.id == "third" }.track(1, AccountRegion.INTERNATIONAL),
+        )
+    }
+
+    @Test(expected = NoSuchElementException::class)
+    fun `unknown releases cannot silently show current courses`() {
+        DanCourseMetadata.coursesForVersion("Splash")
+    }
 }

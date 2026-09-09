@@ -27,11 +27,16 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import org.jsoup.safety.Cleaner
+import org.jsoup.safety.Safelist
 import java.time.Instant
 import java.net.URI
 import java.time.YearMonth
@@ -48,6 +53,23 @@ class MaimaiDxClient(
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(true)
+        .cookieJar(object : CookieJar {
+            override fun loadForRequest(url: HttpUrl): List<Cookie> =
+                cookieManager.getCookie(url.toString())
+                    ?.split(';')
+                    ?.mapNotNull { Cookie.parse(url, it.trim()) }
+                    .orEmpty()
+
+            override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+                if (cookies.isEmpty()) return
+                synchronized(cookieManager) {
+                    cookies.forEach { cookie ->
+                        cookieManager.setCookie(url.toString(), cookie.toString())
+                    }
+                    cookieManager.flush()
+                }
+            }
+        })
         .build()
 
     suspend fun syncAccount(region: AccountRegion): AccountSyncResult = withContext(Dispatchers.IO) {
@@ -113,21 +135,10 @@ class MaimaiDxClient(
     private suspend fun loadAccountProgress(
         region: AccountRegion,
         profile: PlayerProfile,
-    ): PlayerProfile = coroutineScope {
-        val mapDocument = async {
-            optionalSupplement { getDocument(region, "/maimai-mobile/map/") }
-        }
-        val matchingDocument = async {
-            optionalSupplement { getDocument(region, "/maimai-mobile/friend/matching/") }
-        }
-        profile.copy(
-            completedChihoNames = mapDocument.await()
-                ?.let(::extractCompletedChihoNames)
-                .orEmpty(),
-            friendClass = matchingDocument.await()
-                ?.let(::extractFriendClass)
-                .orEmpty()
-                .ifBlank { profile.friendClass },
+    ): PlayerProfile {
+        val mapDocument = optionalSupplement { getDocument(region, "/maimai-mobile/map/") }
+        return profile.copy(
+            completedChihoNames = mapDocument?.let(::extractCompletedChihoNames).orEmpty(),
         )
     }
 
@@ -254,7 +265,7 @@ class MaimaiDxClient(
             }
             val loaded = coroutineScope {
                 batch.map { url ->
-                    async { runCatching { getDocument(region, url) }.getOrNull() }
+                    async { optionalSupplement { getDocument(region, url) } }
                 }.awaitAll()
             }
             loaded.filterNotNull().forEach { document ->
@@ -267,11 +278,11 @@ class MaimaiDxClient(
 
     private fun getDocument(region: AccountRegion, path: String): Document {
         val url = if (path.startsWith("http")) path else region.baseUrl + path
-        val cookie = cookieManager.getCookie(url)
-            ?: throw AuthenticationRequiredException("DX NET login expired; sign in again")
+        if (cookieManager.getCookie(url).isNullOrBlank()) {
+            throw AuthenticationRequiredException("DX NET login expired; sign in again")
+        }
         val request = Request.Builder()
             .url(url)
-            .header("Cookie", cookie)
             .header(
                 "User-Agent",
                 "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 " +
@@ -281,15 +292,6 @@ class MaimaiDxClient(
             .build()
         return client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) error("DX NET returned HTTP ${response.code}")
-            val updatedCookies = response.headers.values("Set-Cookie")
-            if (updatedCookies.isNotEmpty()) {
-                synchronized(cookieManager) {
-                    updatedCookies.forEach { value ->
-                        cookieManager.setCookie(region.baseUrl, value)
-                    }
-                    cookieManager.flush()
-                }
-            }
             val finalUrl = response.request.url.toString()
             if (
                 !finalUrl.startsWith(region.baseUrl) ||
@@ -298,7 +300,13 @@ class MaimaiDxClient(
             ) {
                 throw AuthenticationRequiredException("DX NET login expired; sign in again")
             }
-            Jsoup.parse(response.body?.string().orEmpty(), finalUrl)
+            val document = Jsoup.parse(response.body?.string().orEmpty(), finalUrl)
+            if (document.selectFirst("img[src*=title_error]") != null &&
+                Regex("""ERROR CODE\s*[:：]\s*(?:100001|200002)\b""").containsMatchIn(document.text())
+            ) {
+                throw AuthenticationRequiredException("DX NET session expired; sign in again")
+            }
+            document
         }
     }
 
@@ -501,11 +509,11 @@ internal fun extractCircleData(
                 RegexOption.IGNORE_CASE,
             ).find(pageText)?.groupValues?.get(1)?.trim().orEmpty()
         }
-    val comment = selectedText("[class*=circle_comment], [id*=circle_comment]")
+    val comment = selectedText(".circle_profile_comment, [class*=circle_comment], [id*=circle_comment]")
         .stripLabels("Circle comment", "Comment", "サークルコメント")
     val tags = documents.asSequence()
         .flatMap { document ->
-            document.select("[class*=circle_tag], [class*=circle_genre]").asSequence()
+            document.select(".circle_profile_tag_text, [class*=circle_tag], [class*=circle_genre]").asSequence()
         }
         .map { it.text().normalizedWhitespace() }
         .filter { it.isNotBlank() && it.length <= 60 }
@@ -518,9 +526,9 @@ internal fun extractCircleData(
         RegexOption.IGNORE_CASE,
     ).find(pageText)?.groupValues?.get(1).parseOptionalInt()
     val daysUntilReset = Regex(
-        """(?:reset[^0-9]{0,30}(?:in|after)?|リセットまで\s*あと?)\s*(\d{1,3})\s*(?:days?|日)""",
+        """(?:(\d{1,3})\s+days?\s+until\s+Circle\s+Points\s+reset|(?:reset[^0-9]{0,30}(?:in|after)?|リセットまで\s*あと?)\s*(\d{1,3})\s*(?:days?|日))""",
         RegexOption.IGNORE_CASE,
-    ).find(pageText)?.groupValues?.get(1).parseOptionalInt()
+    ).find(pageText)?.groupValues?.drop(1)?.firstOrNull(String::isNotBlank).parseOptionalInt()
     val nextRewardPoints = Regex(
         """(?:next\s+reward|次の報酬)[^0-9]{0,40}([\d,]+)\s*PT""",
         RegexOption.IGNORE_CASE,
@@ -573,7 +581,10 @@ internal fun extractCircleData(
     val members = extractCircleMembers(documents, playerName)
     val rewards = extractCircleRewards(documents, totalPoints)
     return CircleData(
-        month = circleMonth(pageText, importedAt),
+        month = circleMonth(
+            selectedText(".circle_totalpoint_header_for_index").ifBlank { pageText } + " " + updatedAt,
+            importedAt,
+        ),
         name = resolvedName,
         code = code,
         leader = leader,
@@ -588,7 +599,8 @@ internal fun extractCircleData(
         nextRewardPoints = nextRewardPoints,
         updatedAt = updatedAt,
         characterUrl = documents.firstNotNullOfOrNull { document ->
-            document.selectFirst("[class*=circle] img[src*=Chara], [class*=circle] img[src*=chara]").imageUrl()
+            (document.selectFirst(".circle_profile_character img[src], img[src*=\"/CircleProfile/Character/\"]")
+                ?: document.selectFirst("[class*=circle] img[src*=chara]:not([src*=charabase])")).imageUrl()
                 .takeIf(String::isNotBlank)
         }.orEmpty(),
         backgroundUrl = documents.firstNotNullOfOrNull { document ->
@@ -822,9 +834,106 @@ private fun circlePageKey(document: Document): String {
         .orEmpty()
 }
 
+/**
+ * Retains the official layout, not a second reconstruction of it. Only static presentation survives;
+ * the renderer must also restrict stylesheet subresources and disable scripting/navigation.
+ */
+internal fun sanitizedCircleHtml(document: Document): String {
+    val content = (document.selectFirst(".main_wrapper") ?: document.body()).clone()
+    content.select("[hidden]").remove()
+    content.select("[style]").filter {
+        Regex("""(?:display\s*:\s*none|visibility\s*:\s*hidden)""", RegexOption.IGNORE_CASE)
+            .containsMatchIn(it.attr("style"))
+    }.forEach(Element::remove)
+    content.select("form").unwrap()
+    content.select("input[type=image][src]").forEach { input ->
+        input.tagName("img")
+    }
+    content.select(
+        "script, style, header, footer, nav, [role=navigation], .menu, .spmenu_toggle, " +
+            "#page-top, #page-bottom, .modal, iframe, object, embed, template, noscript, " +
+            "input, textarea, select, [hidden]",
+    ).remove()
+    content.select("img[src]").filter { image ->
+        val file = image.attr("src").substringAfterLast('/').substringBefore('?')
+        file.startsWith("menu_") || file.startsWith("banner_") ||
+            file.startsWith("logo") || file.startsWith("footer") || image.hasClass("submenu_selected")
+    }.forEach { image ->
+        val parent = image.parent()
+        if (parent?.tagName() == "a") parent.remove() else image.remove()
+    }
+    // These menus live outside the header on the official Circle home page.
+    content.select("img[src*=title_circle_submenu]").forEach { title ->
+        title.nextElementSibling()?.remove()
+        title.remove()
+    }
+    content.select("button").forEach { button ->
+        button.attr("type", "button")
+    }
+    content.select("img[src]").forEach { image ->
+        val url = circleStaticUrl(image.absUrl("src"), "img")
+        if (url == null) image.remove() else image.attr("src", url)
+    }
+    val safeStyle = Regex(
+        """(?:font-size|line-height|width|height|min-width|max-width|min-height|max-height|margin(?:-(?:top|right|bottom|left))?|padding(?:-(?:top|right|bottom|left))?|top|right|bottom|left)\s*:\s*-?\d+(?:\.\d+)?(?:px|em|rem|%|)?""",
+        RegexOption.IGNORE_CASE,
+    )
+    content.select("[style]").forEach { element ->
+        val style = element.attr("style").split(';').map(String::trim)
+            .filter { safeStyle.matches(it) }.joinToString(";")
+        element.removeAttr("style")
+        if (style.isNotEmpty()) element.attr("style", style)
+    }
+    val shell = Document.createShell(document.baseUri())
+    shell.body().appendChild(content)
+    val safelist = Safelist()
+        .addTags(
+            "main", "section", "article", "div", "span", "p", "br", "hr", "img", "a", "button",
+            "h1", "h2", "h3", "h4", "h5", "h6", "b", "strong", "i", "em", "small", "sub", "sup",
+            "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "colgroup", "col",
+            "ul", "ol", "li", "dl", "dt", "dd",
+        )
+        .addAttributes(":all", "class", "style")
+        .addAttributes("img", "src", "alt", "width", "height")
+        .addAttributes("td", "colspan", "rowspan")
+        .addAttributes("th", "colspan", "rowspan", "scope")
+        .addAttributes("col", "span")
+        .addAttributes("button", "type")
+        .addProtocols("img", "src", "https")
+    val clean = Cleaner(safelist).clean(shell)
+    document.select("link[rel=stylesheet][href]").forEach { link ->
+        circleStaticUrl(link.absUrl("href"), "css")?.let { url ->
+            clean.head().appendElement("link").attr("rel", "stylesheet").attr("href", url)
+        }
+    }
+    clean.outputSettings().prettyPrint(false)
+    return clean.outerHtml()
+}
+
+private fun circleStaticUrl(value: String, directory: String): String? {
+    val uri = runCatching { URI(value) }.getOrNull() ?: return null
+    if (uri.scheme != "https" || uri.host !in setOf("maimaidx-eng.com", "maimaidx.jp") ||
+        uri.userInfo != null || uri.port !in setOf(-1, 443) || uri.rawPath != uri.path
+    ) return null
+    val path = uri.path ?: return null
+    if (!path.startsWith("/maimai-mobile/$directory/") ||
+        path.split('/').any { it == ".." || it == "." } ||
+        !Regex("""[A-Za-z0-9_./-]+""").matches(path)
+    ) return null
+    val extension = path.substringAfterLast('.').lowercase(Locale.ROOT)
+    if (directory == "css" && extension != "css") return null
+    if (directory == "img" && extension !in setOf("png", "jpg", "jpeg", "gif", "webp")) return null
+    // Never cache account/query parameters; the official version marker alone is static.
+    val version = uri.rawQuery?.takeIf { Regex("""ver=[0-9.]+(?:\?[0-9]+)?""").matches(it) }
+    return "https://${uri.host}$path" + (version?.let { "?$it" } ?: "")
+}
+
 private fun extractCirclePageInfo(document: Document): CirclePageInfo {
     val content = (document.selectFirst(".main_wrapper") ?: document.body()).clone()
-    content.select("script, style, header, footer, #page-top, #page-bottom").remove()
+    content.select(
+        "script, style, header, footer, nav, [role=navigation], .menu, .spmenu_toggle, #page-top, #page-bottom",
+    ).remove()
+    content.select("""a:has(img[src*="/menu_"]), img[src*="/menu_"], .submenu_selected""").remove()
     val itemSelector = listOf(
         "tr",
         ".circle_member_block",
@@ -889,6 +998,7 @@ private fun extractCirclePageInfo(document: Document): CirclePageInfo {
         type = circlePageType(document),
         items = items,
         imageUrls = imageUrls,
+        html = sanitizedCircleHtml(document),
     )
 }
 
@@ -953,22 +1063,20 @@ internal fun extractCompletedChihoNames(document: Document): Set<String> =
             .firstOrNull()
     }
 
-internal fun extractFriendClass(document: Document): String {
-    val labeledClass = Regex(
-        """(?:friend\s*class|class|クラス|階級)\s*[:：]?\s*(LEGEND|SSS[1-5]?|SS[1-5]?|S[1-5]?|A[1-5]?|B[1-5]?)""",
-        RegexOption.IGNORE_CASE,
-    ).find(document.text())?.groupValues?.getOrNull(1)
-    if (!labeledClass.isNullOrBlank()) return labeledClass.uppercase(Locale.ROOT)
-    val classRankUrl = document
-        .selectFirst("""img[src*="/class/class_rank_"]""")
-        .imageUrl()
-    return friendClassFromUrl(classRankUrl)
+
+private fun friendClassFromUrl(url: String): String {
+    // DX NET uses s/l for badge size, followed by a two-digit class ID and an asset hash.
+    val rank = Regex("""class_rank_[sl]_(\d{2})""")
+        .find(url)?.groupValues?.get(1)?.toIntOrNull() ?: return ""
+    return when (rank) {
+        in 0..24 -> "${FRIEND_CLASS_TIERS[rank / 5]}${5 - rank % 5}"
+        25 -> "LEGEND"
+        else -> ""
+    }
 }
 
-private fun friendClassFromUrl(url: String): String = Regex(
-    """class_rank_(legend|sss[1-5]?|ss[1-5]?|s[1-5]?|a[1-5]?|b[1-5]?)_""",
-    RegexOption.IGNORE_CASE,
-).find(url)?.groupValues?.getOrNull(1)?.uppercase(Locale.ROOT).orEmpty()
+private val FRIEND_CLASS_TIERS = listOf("B", "A", "S", "SS", "SSS")
+
 internal fun extractPlayerProfile(
     document: Document,
     region: AccountRegion,

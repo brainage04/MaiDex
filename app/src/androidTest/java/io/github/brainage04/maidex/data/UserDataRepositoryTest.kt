@@ -11,6 +11,30 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class UserDataRepositoryTest {
     @Test
+    fun circleSnapshotHtmlSurvivesRepositoryReload() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repository = UserDataRepository(context)
+        repository.clear()
+        try {
+            val page = CirclePageInfo(
+                title = "Circle profile",
+                text = "Example Circle",
+                type = CirclePageType.PROFILE,
+                html = """<html><head><link rel="stylesheet" href="https://maimaidx-eng.com/maimai-mobile/css/common.css"></head><body><div class="circle_profile_circle_name">Example &amp; Circle</div></body></html>""",
+            )
+            repository.saveTrackingSnapshot(
+                profile = progressProfile(),
+                circle = CircleData(month = "2026-08", name = "Example Circle", pages = listOf(page)),
+            )
+            val reloaded = UserDataRepository(context)
+            assertEquals(page, reloaded.loadCircleSnapshots().single().circle.pages.single())
+            assertEquals(page, reloaded.loadCircleHistory().single().pages.single())
+        } finally {
+            repository.clear()
+        }
+    }
+
+    @Test
     fun trackingSnapshotsKeepDailyPointsPlayCountsAndMonthlyHistory() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val repository = UserDataRepository(context)

@@ -172,6 +172,7 @@ data class CirclePageInfo(
     val type: CirclePageType = CirclePageType.OTHER,
     val items: List<CirclePageItem> = emptyList(),
     val imageUrls: List<String> = emptyList(),
+    val html: String = "",
 )
 
 data class CircleData(

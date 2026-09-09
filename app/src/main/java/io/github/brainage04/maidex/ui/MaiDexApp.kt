@@ -151,8 +151,6 @@ import io.github.brainage04.maidex.data.FilterOptions
 import io.github.brainage04.maidex.data.FilterPreset
 import io.github.brainage04.maidex.data.CircleDailySnapshot
 import io.github.brainage04.maidex.data.CircleData
-import io.github.brainage04.maidex.data.CirclePageInfo
-import io.github.brainage04.maidex.data.CirclePageType
 import io.github.brainage04.maidex.data.MedalLevelTable
 import io.github.brainage04.maidex.data.SongChart
 import io.github.brainage04.maidex.data.SongUnlockInfo
@@ -681,7 +679,14 @@ private fun CatalogContent(
                 }
             },
             label = { Text("Search") },
-            placeholder = { Text("Title, romaji, artist, or notes designer") },
+            placeholder = {
+                Text(
+                    "Title, artist, designer…",
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
             shape = RoundedCornerShape(6.dp),
         )
         CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 40.dp) {
@@ -691,7 +696,7 @@ private fun CatalogContent(
                     .padding(horizontal = 12.dp),
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -1346,7 +1351,12 @@ private fun DanGuideDialog(
     var region by remember(initialRegion) { mutableStateOf(initialRegion) }
     var version by remember { mutableStateOf(DanCourseMetadata.version) }
     var group by remember { mutableStateOf(DanCourseGroup.TRUE) }
-    val courses = DanCourseMetadata.courses.filter { it.group == group }
+    val versionCourses = DanCourseMetadata.coursesForVersion(version)
+    val groups = DanCourseGroup.entries.filter { candidate -> versionCourses.any { it.group == candidate } }
+    LaunchedEffect(version) {
+        if (group !in groups) group = DanCourseGroup.TRUE
+    }
+    val courses = versionCourses.filter { it.group == group }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -1370,7 +1380,7 @@ private fun DanGuideDialog(
                     IconButton(
                         onClick = {
                             context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(DanCourseMetadata.sourceUrl(region))),
+                                Intent(Intent.ACTION_VIEW, Uri.parse(DanCourseMetadata.sourceUrl(region, version))),
                             )
                         },
                     ) {
@@ -1393,7 +1403,7 @@ private fun DanGuideDialog(
                         LabeledDropdown(
                             label = "Version",
                             value = version,
-                            options = listOf(DanCourseMetadata.version),
+                            options = DanCourseMetadata.versions,
                             optionLabel = { it },
                             onSelect = { version = it },
                         )
@@ -1407,7 +1417,7 @@ private fun DanGuideDialog(
                         LabeledDropdown(
                             label = "Dan Type",
                             value = group,
-                            options = DanCourseGroup.entries,
+                            options = groups,
                             optionLabel = { option ->
                                 when (option) {
                                     DanCourseGroup.NORMAL -> "Dan 1–10"
@@ -1426,7 +1436,7 @@ private fun DanGuideDialog(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(courses, key = DanCourse::id) { course ->
+                    items(courses, key = { "$version:${it.id}" }) { course ->
                         DanCourseCard(
                             course = course,
                             region = region,
@@ -2738,7 +2748,7 @@ private fun CircleDialog(
                     item(key = "tracking") {
                         CircleTrackingCard(
                             settings = trackingSettings,
-                            isSyncing = importStatus is ImportStatus.Running,
+                            importStatus = importStatus,
                             onSync = onSync,
                         )
                     }
@@ -2758,23 +2768,20 @@ private fun CircleDialog(
                             }
                         }
                     } else {
-                        item(key = "overview") {
-                            CircleOverviewCard(current)
-                        }
-                        val structuredPages = current.pages.filter { page ->
-                            page.type != CirclePageType.OTHER &&
-                                page.type != CirclePageType.PROFILE
-                        }
-                        if (structuredPages.isNotEmpty()) {
-                            item(key = "details-heading") {
-                                CircleWebTitle("Official circle pages")
+                        val officialPages = current.pages.filter { it.html.isNotBlank() }
+                        if (officialPages.isEmpty()) {
+                            item(key = "snapshot-required") {
+                                Text(
+                                    "Sync now to capture the official Circle layouts.",
+                                    modifier = Modifier.padding(12.dp),
+                                )
                             }
-                            items(
-                                structuredPages,
-                                key = { page -> "page-${page.type}-${page.title}" },
-                            ) { page ->
-                                CirclePageCard(page, current)
-                            }
+                        }
+                        items(
+                            officialPages,
+                            key = { page -> "page-${page.type}-${page.title}" },
+                        ) { page ->
+                            OfficialCirclePage(html = page.html, modifier = Modifier.fillMaxWidth())
                         }
                         if (snapshots.isNotEmpty()) {
                             item(key = "history-heading") {
@@ -2860,47 +2867,15 @@ private fun CircleWebTitle(title: String) {
     }
 }
 
-@Composable
-private fun CircleOfficialTitle(type: CirclePageType, title: String) {
-    val imageUrl = DxNetAssets.circleTitleImageUrl(type)
-    if (imageUrl.isNotBlank()) {
-        AsyncImage(
-            model = imageUrl,
-            contentDescription = title,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(38.dp),
-            contentScale = ContentScale.Fit,
-        )
-    } else {
-        CircleWebTitle(title)
-    }
-}
-
-@Composable
-private fun CircleMetricPill(value: String, label: String, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        color = Color.White,
-        shape = RoundedCornerShape(50),
-        border = BorderStroke(2.dp, DxCirclePink),
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(value, color = DxCirclePink, fontWeight = FontWeight.Black)
-            Text(label, style = MaterialTheme.typography.labelSmall, color = DxCircleInk)
-        }
-    }
-}
 
 @Composable
 private fun CircleTrackingCard(
     settings: TrackingSettings,
-    isSyncing: Boolean,
+    importStatus: ImportStatus,
     onSync: () -> Unit,
 ) {
+    val isSyncing = importStatus is ImportStatus.Running
+    val lastError = (importStatus as? ImportStatus.Failure)?.message ?: settings.lastError
     Card(
         colors = CardDefaults.cardColors(containerColor = Color.White),
         border = BorderStroke(2.dp, DxCircleBlueDark),
@@ -2913,8 +2888,8 @@ private fun CircleTrackingCard(
             CircleWebTitle("Circle data sync")
             val status = when {
                 isSyncing -> "Syncing now…"
-                settings.lastError.isNotBlank() ->
-                    "Last sync failed: ${settings.lastError}"
+                lastError.isNotBlank() ->
+                    "Last sync failed: $lastError"
                 settings.lastSuccessAt > 0L ->
                     "Last synced ${formatTrackedTime(settings.lastSuccessAt)}"
                 else -> "Not synced yet"
@@ -2922,7 +2897,7 @@ private fun CircleTrackingCard(
             Text(
                 status,
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (settings.lastError.isBlank() || isSyncing) {
+                color = if (lastError.isBlank() || isSyncing) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
                     MaterialTheme.colorScheme.error
@@ -2954,145 +2929,6 @@ private fun CircleTrackingCard(
     }
 }
 
-@Composable
-private fun CircleOverviewCard(circle: CircleData) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(2.dp, DxCircleBlueDark),
-        shape = RoundedCornerShape(8.dp),
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            CircleOfficialTitle(CirclePageType.PROFILE, "Circle profile")
-            CircleProfileVisual(circle)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CircleMetricPill(
-                    value = "${formatCount(circle.totalPoints)} PT",
-                    label = "Circle total points",
-                    modifier = Modifier.weight(1f),
-                )
-                CircleMetricPill(
-                    value = circle.regionalRank?.let { "Rank ${formatCount(it)}" } ?: "—",
-                    label = circle.rankingLabel.ifBlank { "Current ranking" },
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            circle.code.takeIf(String::isNotBlank)?.let { CircleInfoRow("Circle code", it) }
-            circle.leader.takeIf(String::isNotBlank)?.let { CircleInfoRow("Leader", it) }
-            circle.circleClass.takeIf(String::isNotBlank)?.let { CircleInfoRow("Circle class", it) }
-            circle.memberCount?.let { CircleInfoRow("Members", it.toString()) }
-            circle.daysUntilReset?.let { CircleInfoRow("Days until reset", it.toString()) }
-            circle.nextRewardPoints?.let { CircleInfoRow("Points until next reward", formatCount(it)) }
-            circle.updatedAt.takeIf(String::isNotBlank)?.let { CircleInfoRow("DX NET updated", it) }
-            if (circle.tags.isNotEmpty()) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    circle.tags.forEach { tag ->
-                        Surface(
-                            color = DxCirclePinkLight,
-                            shape = RoundedCornerShape(4.dp),
-                            border = BorderStroke(1.dp, DxCirclePink),
-                        ) {
-                            Text(
-                                tag,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CircleProfileVisual(circle: CircleData) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(156.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(DxCirclePinkLight),
-    ) {
-        circle.backgroundUrl.takeIf(String::isNotBlank)?.let { url ->
-            AsyncImage(
-                model = url,
-                contentDescription = "Circle background",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-        }
-        circle.characterUrl.takeIf(String::isNotBlank)?.let { url ->
-            AsyncImage(
-                model = url,
-                contentDescription = "Circle character",
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .align(Alignment.CenterEnd)
-                    .padding(4.dp),
-                contentScale = ContentScale.Fit,
-            )
-        }
-        Surface(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .padding(10.dp),
-            color = Color.White.copy(alpha = 0.94f),
-            shape = RoundedCornerShape(6.dp),
-            border = BorderStroke(2.dp, DxCirclePink),
-            shadowElevation = 2.dp,
-        ) {
-            Row(
-                modifier = Modifier.padding(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Surface(
-                    modifier = Modifier.size(54.dp),
-                    color = Color.White,
-                    shape = RoundedCornerShape(6.dp),
-                    border = BorderStroke(1.dp, DxCirclePink),
-                ) {
-                    if (circle.profileImageUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = circle.profileImageUrl,
-                            contentDescription = "${circle.name} profile picture",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
-                        )
-                    } else {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.Groups,
-                                contentDescription = null,
-                                modifier = Modifier.size(32.dp),
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        circle.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        circle.comment.ifBlank { "No circle note" },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun CircleMonthCard(circle: CircleData, initiallyExpanded: Boolean) {
@@ -3165,247 +3001,6 @@ private fun CircleMonthCard(circle: CircleData, initiallyExpanded: Boolean) {
     }
 }
 
-@Composable
-private fun CirclePageCard(page: CirclePageInfo, circle: CircleData) {
-    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        CircleOfficialTitle(page.type, page.title)
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = Color.White,
-            shape = RoundedCornerShape(8.dp),
-            border = BorderStroke(2.dp, DxCircleBlueDark),
-        ) {
-            Column(
-                modifier = Modifier.padding(10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                when (page.type) {
-                    CirclePageType.PROFILE -> CircleProfileVisual(circle)
-                    CirclePageType.POINT_REWARD -> CircleRewardPage(circle)
-                    CirclePageType.MEMBER -> CircleMemberPage(circle)
-                    else -> CircleStructuredPage(page)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CircleRewardPage(circle: CircleData) {
-    if (circle.rewards.isEmpty()) {
-        CirclePageEmptyState("No point rewards were listed by DX NET.")
-        return
-    }
-    circle.rewards.sortedBy { reward -> reward.pointsRequired }.forEach { reward ->
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = Color.White,
-            shape = RoundedCornerShape(4.dp),
-            border = BorderStroke(1.dp, DxCircleInk),
-        ) {
-            Row(
-                modifier = Modifier.padding(9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (reward.imageUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = reward.imageUrl,
-                        contentDescription = reward.name,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(8.dp)),
-                        contentScale = ContentScale.Fit,
-                    )
-                    Spacer(Modifier.width(9.dp))
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(reward.name, fontWeight = FontWeight.Bold)
-                    Text(
-                        "${formatCount(reward.pointsRequired)} PT",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (reward.earned) {
-                    Surface(
-                        color = Color(0xFFFFC72C),
-                        shape = RoundedCornerShape(50),
-                    ) {
-                        Text(
-                            "GET",
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CircleMemberPage(circle: CircleData) {
-    if (circle.members.isEmpty()) {
-        CirclePageEmptyState("DX NET did not list any circle members.")
-        return
-    }
-    circle.members.sortedByDescending { member -> member.points }.forEachIndexed { index, member ->
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = if (member.isCurrentUser) DxCirclePinkLight else Color(0xFFE2F5FC),
-            shape = RoundedCornerShape(4.dp),
-            border = BorderStroke(1.dp, DxCircleBlueDark),
-        ) {
-            Row(
-                modifier = Modifier.padding(9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "#${index + 1}",
-                    modifier = Modifier.width(34.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Black,
-                )
-                if (member.avatarUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = member.avatarUrl,
-                        contentDescription = member.name,
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(RoundedCornerShape(8.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
-                    Spacer(Modifier.width(9.dp))
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        member.name + if (member.isCurrentUser) " (you)" else "",
-                        fontWeight = FontWeight.Bold,
-                    )
-                    if (member.role.isNotBlank()) {
-                        Text(
-                            member.role,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Surface(
-                    color = DxCirclePink,
-                    shape = RoundedCornerShape(50),
-                ) {
-                    Text(
-                        "${formatCount(member.points)} PT",
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        fontWeight = FontWeight.Black,
-                        color = Color.White,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CircleStructuredPage(page: CirclePageInfo) {
-    val heroImage = page.imageUrls.firstOrNull { image ->
-        page.items.none { item -> item.imageUrl == image }
-    }
-    heroImage?.let { image ->
-        AsyncImage(
-            model = image,
-            contentDescription = page.title,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(120.dp)
-                .clip(RoundedCornerShape(10.dp)),
-            contentScale = ContentScale.Fit,
-        )
-    }
-    if (page.items.isEmpty()) {
-        val message = page.text.takeIf(String::isNotBlank) ?: when (page.type) {
-            CirclePageType.SEARCH ->
-                "Enter a circle code or browse recruiting circles on DX NET."
-            CirclePageType.INVITE_ACCEPT ->
-                "Circles that have invited you will be displayed here."
-            CirclePageType.FESTA,
-            CirclePageType.FESTA_RANKING,
-            -> "Outside Circle Festa period. Please wait for the next event."
-            CirclePageType.CHALLENGE_RANKING ->
-                "No Circle Challenge ranking is available yet."
-            CirclePageType.RANKING -> "No circle ranking entries are available."
-            CirclePageType.LEAVE -> "Leave the circle?"
-            else -> "No information is available for this page."
-        }
-        CirclePageEmptyState(message)
-        return
-    }
-    page.items.take(100).forEachIndexed { index, item ->
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = Color.White,
-            shape = RoundedCornerShape(4.dp),
-            border = BorderStroke(1.dp, DxCircleInk),
-        ) {
-            Row(
-                modifier = Modifier.padding(9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (
-                    page.type == CirclePageType.RANKING ||
-                    page.type == CirclePageType.CHALLENGE_RANKING
-                ) {
-                    Text(
-                        "#${index + 1}",
-                        modifier = Modifier.width(34.dp),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Black,
-                    )
-                }
-                if (item.imageUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = item.imageUrl,
-                        contentDescription = item.label,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(8.dp)),
-                        contentScale = ContentScale.Fit,
-                    )
-                    Spacer(Modifier.width(9.dp))
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(item.label, fontWeight = FontWeight.Bold)
-                    if (item.value.isNotBlank()) {
-                        Text(
-                            item.value,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CirclePageEmptyState(message: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = Color.White,
-        shape = RoundedCornerShape(6.dp),
-        border = BorderStroke(2.dp, DxCircleBlue),
-    ) {
-        Text(
-            message,
-            modifier = Modifier.padding(12.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
 
 @Composable
 private fun CircleSectionHeading(title: String, subtitle: String) {

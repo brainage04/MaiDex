@@ -8,9 +8,120 @@ import io.github.brainage04.maidex.data.Regions
 import io.github.brainage04.maidex.data.SongChart
 import org.jsoup.Jsoup
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MaimaiDxClientTest {
+    @Test
+    fun `live Circle layers and numeric history survive without account controls`() {
+        val document = Jsoup.parse(
+            """
+            <link rel="stylesheet" href="/maimai-mobile/css/common.css?ver=1.65?20250401">
+            <link rel="stylesheet" href="/maimai-mobile/css/unique.css?ver=1.65?20250902">
+            <div class="wrapper main_wrapper t_c">
+              <header>Site header</header>
+              <div class="m_b_10 f_0"><a href="/account"><img src="/maimai-mobile/img/menu_sub_circle_home.png"></a></div>
+              <img class="title m_10" src="/maimai-mobile/img/circle/title/title_circle_profile.png">
+              <div class="h_270 p_r">
+                <div class="circle_profile_character_bg"><img src="/maimai-mobile/img/circle/profile/UI_circle_profile_CharaBase.png"></div>
+                <div class="circle_profile_character"><img src="/maimai-mobile/img/CircleProfile/Character/example.png"></div>
+                <div class="circle_profile_bg"><img src="/maimai-mobile/img/CircleProfile/Background/example.png"></div>
+                <div class="circle_profile_class"><img src="/maimai-mobile/img/circle/profile/circle_profile_color_gold.png"></div>
+                <div class="circle_profile_user_name_frame"><img src="/maimai-mobile/img/circle/profile/circle_profile_username_member.png"></div>
+                <div class="circle_profile_tag1 circle_profile_tag_bg"><img src="/maimai-mobile/img/circle/profile/circle_profile_tag_red.png"></div>
+                <div class="circle_profile_circle_name"><span>Example Circle</span></div>
+                <div class="circle_profile_circle_code"><span>TEST1234</span></div>
+                <div class="circle_profile_user_name"><span>Example Player</span></div>
+                <div class="circle_profile_comment"><span>Play together!</span></div>
+                <div class="circle_profile_tag1 circle_profile_tag_text"><span style="font-size: 15px;">Friend Circle</span></div>
+              </div>
+              <div class="town_block">
+                <div class="circle_totalpoint_block"><div class="h_90">
+                  <div class="circle_totalpoint_header_for_index">Circle Total Points for September</div>
+                  <div class="circle_totalpoint_point"><span>1,250</span><span> PT</span></div>
+                </div></div>
+                <div><span>21</span> days until Circle Points reset</div>
+                <div class="circle_pointranking_block"><div class="h_90">
+                  <div class="circle_pointranking_header">Current Ranking for September</div>
+                  <div class="circle_pointranking_point"><span>Rank </span><span>42</span></div>
+                </div></div>
+              </div>
+              <div class="circle_pointreward_block">Next Reward <span>750</span>PT</div>
+              <div class="circle_challenge_chosemember_block">
+                <img src="/maimai-mobile/img/Music/example.png">
+                <form action="/change" method="post"><input type="hidden" name="token" value="private-token">
+                  <button type="submit" class="music_basic_btn" onclick="submit()">Ranking</button>
+                </form>
+              </div>
+              <img class="title" src="/maimai-mobile/img/circle/title/title_circle_festa.png">
+              <div class="container">The CiRCLE FESTA is not currently being held.</div>
+              <div>Past Circle Festa: May 2026</div>
+              <footer>Site footer</footer>
+            </div>
+            """.trimIndent(),
+            "https://maimaidx-eng.com/maimai-mobile/circle/",
+        )
+        val circle = extractCircleData(
+            listOf(document),
+            "Example Player",
+            importedAt = java.time.Instant.parse("2026-09-10T00:00:00Z").toEpochMilli(),
+        )!!
+        assertEquals("2026-09", circle.month)
+        assertEquals("Play together!", circle.comment)
+        assertEquals(listOf("Friend Circle"), circle.tags)
+        assertEquals("https://maimaidx-eng.com/maimai-mobile/img/CircleProfile/Character/example.png", circle.characterUrl)
+        assertEquals(1250, circle.totalPoints)
+        assertEquals(42, circle.regionalRank)
+        assertEquals(21, circle.daysUntilReset)
+        assertEquals(750, circle.nextRewardPoints)
+        val snapshot = Jsoup.parse(circle.pages.single().html)
+        listOf(
+            ".circle_profile_character_bg img", ".circle_profile_character img", ".circle_profile_bg img",
+            ".circle_profile_class img", ".circle_profile_user_name_frame img", ".circle_profile_tag_bg img",
+            ".circle_profile_tag_text", ".circle_totalpoint_block", ".circle_pointranking_block",
+            ".circle_pointreward_block", ".circle_challenge_chosemember_block", "img[src*=title_circle_festa]",
+        ).forEach { selector -> assertTrue(selector, snapshot.selectFirst(selector) != null) }
+        assertTrue(snapshot.text().contains("The CiRCLE FESTA"))
+        assertEquals("Ranking", snapshot.selectFirst("button[type=button]")?.text())
+        assertEquals(2, snapshot.select("link[rel=stylesheet]").size)
+        assertFalse(snapshot.outerHtml().contains("private-token"))
+        assertTrue(snapshot.select("form, input, header, footer, [onclick], img[src*=menu_sub]").isEmpty())
+    }
+
+    @Test
+    fun `Circle snapshot refuses active markup and nonstatic resource tricks`() {
+        val snapshot = Jsoup.parse(sanitizedCircleHtml(Jsoup.parse(
+            """
+            <link rel="stylesheet" href="https://evil.test/maimai-mobile/css/common.css">
+            <link rel="stylesheet" href="/maimai-mobile/css/common.css?token=private-token">
+            <main class="main_wrapper">
+              <script>private-script</script><iframe src="/account">private-frame</iframe>
+              <div hidden>private-hidden</div><div style="display:none">private-hidden-style</div>
+              <input value="private-input"><textarea>private-textarea</textarea>
+              <a href="javascript:alert(1)" data-token="private-data" onmouseover="alert(1)">Visible link</a>
+              <span style="font-size:15px;background:url(https://evil.test/leak);width:expression(alert(1))">Safe text</span>
+              <img src="https://maimaidx-eng.com.evil.test/maimai-mobile/img/a.png">
+              <img src="https://maimaidx-eng.com@evil.test/maimai-mobile/img/a.png">
+              <img src="/maimai-mobile/img/../account.png">
+              <img src="/maimai-mobile/img/%2e%2e/account.png">
+              <img src="/maimai-mobile/img/a.svg">
+              <img src="data:image/png;base64,AAAA">
+              <img src="/maimai-mobile/img/safe.png?token=private-token" onerror="alert(1)">
+              <svg><script>alert(1)</script></svg>
+            </main>
+            """.trimIndent(),
+            "https://maimaidx-eng.com/maimai-mobile/circle/",
+        )))
+        assertEquals(listOf("https://maimaidx-eng.com/maimai-mobile/img/safe.png"), snapshot.select("img").map { it.attr("src") })
+        assertEquals("https://maimaidx-eng.com/maimai-mobile/css/common.css", snapshot.selectFirst("link")?.attr("href"))
+        assertEquals("Visible link", snapshot.selectFirst("a")?.text())
+        assertEquals("font-size:15px", snapshot.selectFirst("span")?.attr("style"))
+        assertTrue(snapshot.select("script, iframe, input, textarea, svg, [href^=javascript], [onerror], [onmouseover], [data-token]").isEmpty())
+        assertFalse(snapshot.outerHtml().contains("private-"))
+        assertFalse(snapshot.outerHtml().contains("evil.test"))
+    }
+
     @Test
     fun `recent play title excludes displayed level and icons`() {
         val element = Jsoup.parse(
@@ -37,7 +148,7 @@ class MaimaiDxClientTest {
               <div class="name_block f_l f_16">B r a i n a g e</div>
               <div class="rating_block">16070</div>
               <img class="h_35 f_l" src="/maimai-mobile/img/course.png">
-              <img class="p_l_10 h_35 f_l" src="/maimai-mobile/img/class/class_rank_s_9f8e.png">
+              <img class="p_l_10 h_35 f_l" src="/maimai-mobile/img/class/class_rank_s_00ZqZmdpb8.png">
               <div class="p_l_10 f_l f_14">×355</div>
             </div>
             <div>play count of current version : 16</div>
@@ -60,10 +171,10 @@ class MaimaiDxClientTest {
         assertEquals("gold", profile.titleRarity)
         assertEquals("https://maimaidx-eng.com/maimai-mobile/img/course.png", profile.courseRankUrl)
         assertEquals(
-            "https://maimaidx-eng.com/maimai-mobile/img/class/class_rank_s_9f8e.png",
+            "https://maimaidx-eng.com/maimai-mobile/img/class/class_rank_s_00ZqZmdpb8.png",
             profile.classRankUrl,
         )
-        assertEquals("S", profile.friendClass)
+        assertEquals("B5", profile.friendClass)
         assertEquals(16, profile.currentVersionPlayCount)
         assertEquals(2_203, profile.totalPlayCount)
         assertEquals(123L, profile.importedAt)
@@ -88,17 +199,32 @@ class MaimaiDxClientTest {
     }
 
     @Test
-    fun `friend matching parser prefers the detailed displayed class`() {
-        val document = Jsoup.parse(
-            """
-            <div class="friend_matching">
-              <div>Friend Class: SSS2</div>
-              <img src="/maimai-mobile/img/class/class_rank_sss_9f8e.png">
-            </div>
-            """.trimIndent(),
-        )
+    fun `profile class uses numeric badge ID and ignores other players`() {
+        fun profileClass(filename: String): String {
+            val document = Jsoup.parse(
+                """
+                <div class="see_through_block">
+                  <div class="name_block">Player</div>
+                  <div class="rating_block">16000</div>
+                  <img class="h_35 f_l" src="/maimai-mobile/img/course/course_rank_10.png">
+                  <img class="p_l_10 h_35 f_l" src="/maimai-mobile/img/class/$filename.png">
+                </div>
+                <div class="see_through_block">
+                  <div class="name_block">Other player</div>
+                  <img class="p_l_10 h_35 f_l" src="/maimai-mobile/img/class/class_rank_s_11asset.png">
+                </div>
+                """.trimIndent(),
+                "https://maimaidx-eng.com/maimai-mobile/home/",
+            )
+            return extractPlayerProfile(document, AccountRegion.INTERNATIONAL)!!.friendClass
+        }
 
-        assertEquals("SSS2", extractFriendClass(document))
+        assertEquals("SS2", profileClass("class_rank_s_18Hixuxin0"))
+        assertEquals("S3", profileClass("class_rank_l_12ruJTrWoU"))
+        assertEquals("SSS1", profileClass("class_rank_s_24asset"))
+        assertEquals("LEGEND", profileClass("class_rank_s_25asset"))
+        assertEquals("", profileClass("class_rank_s_99asset"))
+        assertEquals("", profileClass("class_rank_s_unknown"))
     }
 
     @Test
@@ -270,6 +396,35 @@ class MaimaiDxClientTest {
             ),
             types,
         )
+    }
+
+    @Test
+    fun `circle page excludes navigation without removing matching circle content`() {
+        val document = Jsoup.parse(
+            """
+            <main class="main_wrapper">
+              <nav class="spmenu_navigation">
+                <div class="basic_block">FRIENDS navigation<img src="/img/friends.png"></div>
+              </nav>
+              <div class="menu"><div class="basic_block">FRIENDS navigation</div></div>
+              <div class="m_t_5 m_b_10 p_r t_l f_0">
+                <a href="/maimai-mobile/friend/"><img src="/maimai-mobile/img/menu_sub_friend_list.png"></a>
+              </div>
+              <div class="circle_name_block">FRIENDS circle</div>
+              <div class="circle_comment">Play with FRIENDS</div>
+              <div class="basic_block"><b>Reward</b>500 PT<img src="/reward.png"></div>
+            </main>
+            """.trimIndent(),
+            "https://maimaidx-eng.com/maimai-mobile/circle/",
+        )
+
+        val page = extractCircleData(listOf(document), "Player", importedAt = 123L)!!.pages.single()
+
+        assertTrue(page.text.contains("FRIENDS circle"))
+        assertTrue(page.text.contains("Play with FRIENDS"))
+        assertFalse(page.text.contains("navigation"))
+        assertEquals(listOf("Reward"), page.items.map { it.label })
+        assertEquals(listOf("https://maimaidx-eng.com/reward.png"), page.imageUrls)
     }
 
     @Test
