@@ -2684,7 +2684,7 @@ private fun AccountDialog(
                     ) {
                         Text(
                             if (autoLogin.username != null) {
-                                "Remove imported account data and saved credentials"
+                                "Remove imported account data and saved SEGA ID login"
                             } else {
                                 "Remove imported account data"
                             },

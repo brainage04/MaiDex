@@ -24,7 +24,6 @@ import io.github.brainage04.maidex.MainActivity
 import io.github.brainage04.maidex.R
 import io.github.brainage04.maidex.data.AccountRegion
 import io.github.brainage04.maidex.data.CatalogRepository
-import io.github.brainage04.maidex.data.ImportResult
 import io.github.brainage04.maidex.data.UserDataRepository
 import io.github.brainage04.maidex.network.MaimaiDxClient
 import kotlinx.coroutines.Dispatchers
@@ -39,20 +38,20 @@ class AutoUpdateWorker(
     override suspend fun doWork(): Result {
         val notifier = AutoUpdateNotifier(applicationContext)
         return try {
-            val store = AutoLoginStore.create(applicationContext)
             val users = UserDataRepository(applicationContext)
             val region = withContext(Dispatchers.IO) { users.loadProfile()?.region }
                 ?: AccountRegion.INTERNATIONAL
-            val cookieManager = withContext(Dispatchers.Main) { CookieManager.getInstance() }
-            val client = MaimaiDxClient(cookieManager)
-            val gateway = object : DxNetGateway {
-                override suspend fun importAll(region: AccountRegion, onProgress: (String) -> Unit): ImportResult {
-                    val charts = withContext(Dispatchers.IO) { CatalogRepository(applicationContext).load().charts }
-                    return client.import(region, charts, onProgress)
-                }
-
-                override suspend fun signIn(region: AccountRegion, credentials: DxNetCredentials): SignInResult =
-                    client.signInWithSegaId(region, credentials)
+            val client = MaimaiDxClient(withContext(Dispatchers.Main) { CookieManager.getInstance() })
+            val refresh = DxNetRefresh { accountRegion, onProgress ->
+                val charts = withContext(Dispatchers.IO) { CatalogRepository(applicationContext).load().charts }
+                val result = client.import(accountRegion, charts, onProgress)
+                withContext(Dispatchers.IO) { users.saveImport(result) }
+                RefreshResult(
+                    summary = "Updated ${result.scores.size} scores and ${result.playDetails.size} recent plays",
+                    scores = result.scores.size,
+                    recentDetails = result.playDetails.size,
+                    unmatched = result.unmatchedCharts,
+                )
             }
             val reporter = object : AutoUpdateReporter {
                 override fun started() {
@@ -68,13 +67,12 @@ class AutoUpdateWorker(
                 override fun finished(outcome: AutoUpdateOutcome.Finished) = notifier.showFinished(outcome)
             }
             val runner = AutoUpdateRunner(
-                store = store,
-                gateway = gateway,
-                saveImport = { result -> withContext(Dispatchers.IO) { users.saveImport(result) } },
-                reporter = reporter,
+                AutoLoginStore.create(applicationContext),
+                DxNetSignIn { accountRegion, credentials -> client.signInWithSegaId(accountRegion, credentials) },
+                reporter,
             )
             val outcome = withContext(Dispatchers.IO) {
-                runner.run(region, force = inputData.getBoolean(KEY_FORCE, false))
+                runner.run(region, refresh, force = inputData.getBoolean(KEY_FORCE, false))
             }
             // Never Result.retry(): a failed automatic update waits for the next app open.
             Result.success(
@@ -108,9 +106,9 @@ private fun AutoUpdateOutcome.toData(): Data = when (this) {
     is AutoUpdateOutcome.Updated -> workDataOf(
         AutoUpdateWorker.KEY_OUTCOME to AutoUpdateWorker.OUTCOME_UPDATED,
         AutoUpdateWorker.KEY_MESSAGE to summary,
-        AutoUpdateWorker.KEY_SCORES to scores,
-        AutoUpdateWorker.KEY_RECENT to recentDetails,
-        AutoUpdateWorker.KEY_UNMATCHED to unmatched,
+        AutoUpdateWorker.KEY_SCORES to result.scores,
+        AutoUpdateWorker.KEY_RECENT to result.recentDetails,
+        AutoUpdateWorker.KEY_UNMATCHED to result.unmatched,
     )
     is AutoUpdateOutcome.Failed -> workDataOf(
         AutoUpdateWorker.KEY_OUTCOME to AutoUpdateWorker.OUTCOME_FAILED,

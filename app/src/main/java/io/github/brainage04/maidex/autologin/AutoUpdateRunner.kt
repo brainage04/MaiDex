@@ -1,18 +1,32 @@
 package io.github.brainage04.maidex.autologin
 
 import io.github.brainage04.maidex.data.AccountRegion
-import io.github.brainage04.maidex.data.ImportResult
 import io.github.brainage04.maidex.network.AuthenticationRequiredException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 
-/** The DX NET operations the automatic update needs; faked in tests. */
-interface DxNetGateway {
-    /** Imports everything with the current session; throws [AuthenticationRequiredException] when signed out. */
-    suspend fun importAll(region: AccountRegion, onProgress: (String) -> Unit): ImportResult
-
+/** Signs in to DX NET with a SEGA ID; faked in tests. */
+fun interface DxNetSignIn {
     suspend fun signIn(region: AccountRegion, credentials: DxNetCredentials): SignInResult
 }
+
+/**
+ * Fetches and saves DX NET data with the current session, throwing
+ * [AuthenticationRequiredException] when signed out. The full import (app open) and the lighter
+ * hourly tracking sync are both refreshes.
+ */
+fun interface DxNetRefresh {
+    suspend fun refresh(region: AccountRegion, onProgress: (String) -> Unit): RefreshResult
+}
+
+data class RefreshResult(
+    val summary: String,
+    val scores: Int = 0,
+    val recentDetails: Int = 0,
+    val unmatched: Int = 0,
+)
 
 /** Receives the visible start/progress/end of an automatic update (notification + in-app status). */
 interface AutoUpdateReporter {
@@ -34,14 +48,8 @@ sealed interface AutoUpdateOutcome {
         val summary: String
     }
 
-    data class Updated(
-        val scores: Int,
-        val recentDetails: Int,
-        val unmatched: Int,
-        val signedIn: Boolean,
-    ) : Finished {
-        override val summary: String
-            get() = "Updated $scores scores and $recentDetails recent plays"
+    data class Updated(val result: RefreshResult, val signedIn: Boolean) : Finished {
+        override val summary: String get() = result.summary
     }
 
     data class Failed(val reason: FailureReason, val message: String) : Finished {
@@ -52,34 +60,46 @@ sealed interface AutoUpdateOutcome {
 enum class FailureReason { WRONG_CREDENTIALS, SITE_REJECTED, SITE_CHANGED, NETWORK, CREDENTIALS_UNREADABLE, OTHER }
 
 /**
- * One automatic "sign in if needed, then import" pass.
- *
- * Safety properties: the existing session is tried first, at most one credential sign-in is made
- * per run, a wrong password pauses automatic sign-in until the user saves new credentials (so
- * SEGA never sees repeated bad logins), and attempts are throttled to one per [minIntervalMillis]
- * however often the app is opened. Nothing here retries.
+ * Automatic "sign in if needed, then refresh" passes, shared by the app-open update and the
+ * hourly tracker so both obey the same safeguards: nothing happens unless the user opted in and
+ * saved credentials; at most one credential sign-in per pass; a wrong password pauses automatic
+ * sign-in until the user saves new credentials (so SEGA never sees repeated bad logins); passes
+ * are throttled to one per [minIntervalMillis] across both callers; nothing here retries.
  */
 class AutoUpdateRunner(
     private val store: AutoLoginStore,
-    private val gateway: DxNetGateway,
-    private val saveImport: suspend (ImportResult) -> Unit,
+    private val signIn: DxNetSignIn,
     private val reporter: AutoUpdateReporter,
     private val clock: () -> Long = System::currentTimeMillis,
     private val minIntervalMillis: Long = DEFAULT_MIN_INTERVAL_MILLIS,
 ) {
-    suspend fun run(region: AccountRegion, force: Boolean = false): AutoUpdateOutcome {
-        if (!store.isEnabled) return AutoUpdateOutcome.Disabled
-        if (!region.supportsSegaIdLogin) return AutoUpdateOutcome.UnsupportedRegion
-        store.rejectionMessage?.let { return AutoUpdateOutcome.Paused(it) }
-        if (!store.hasCredentials) return AutoUpdateOutcome.NoCredentials
-        val now = clock()
-        val sinceLast = now - store.lastAttemptAt
-        if (!force && sinceLast in 0 until minIntervalMillis) return AutoUpdateOutcome.Throttled
+    /** App open: refresh with the existing session, signing in once if it has expired. */
+    suspend fun run(region: AccountRegion, refresh: DxNetRefresh, force: Boolean = false): AutoUpdateOutcome =
+        guarded(region, force) {
+            try {
+                AutoUpdateOutcome.Updated(refresh.refresh(region, reporter::progress), signedIn = false)
+            } catch (_: AuthenticationRequiredException) {
+                signInThenRefresh(region, refresh)
+            }
+        }
 
-        store.recordAttempt(now)
+    /**
+     * Hourly tracker: the caller's silent refresh already found the session expired, so sign in
+     * once and refresh once. Same gates and throttle as [run]; never forced.
+     */
+    suspend fun recoverExpiredSession(region: AccountRegion, refresh: DxNetRefresh): AutoUpdateOutcome =
+        guarded(region, force = false) { signInThenRefresh(region, refresh) }
+
+    private suspend fun guarded(
+        region: AccountRegion,
+        force: Boolean,
+        attempt: suspend () -> AutoUpdateOutcome.Finished,
+    ): AutoUpdateOutcome {
+        // Check-and-record is atomic so the app-open update and the tracker can't both sign in.
+        gate(region, force)?.let { return it }
         reporter.started()
         val outcome = try {
-            attempt(region)
+            attempt()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: IOException) {
@@ -95,53 +115,56 @@ class AutoUpdateRunner(
         return outcome
     }
 
-    private suspend fun attempt(region: AccountRegion): AutoUpdateOutcome.Finished {
+    private suspend fun gate(region: AccountRegion, force: Boolean): AutoUpdateOutcome.Skipped? =
+        attemptLock.withLock {
+            if (!store.isEnabled) return@withLock AutoUpdateOutcome.Disabled
+            if (!region.supportsSegaIdLogin) return@withLock AutoUpdateOutcome.UnsupportedRegion
+            store.rejectionMessage?.let { return@withLock AutoUpdateOutcome.Paused(it) }
+            if (!store.hasCredentials) return@withLock AutoUpdateOutcome.NoCredentials
+            val now = clock()
+            if (!force && now - store.lastAttemptAt in 0 until minIntervalMillis) {
+                return@withLock AutoUpdateOutcome.Throttled
+            }
+            store.recordAttempt(now)
+            null
+        }
+
+    private suspend fun signInThenRefresh(region: AccountRegion, refresh: DxNetRefresh): AutoUpdateOutcome.Finished {
         val credentials = store.loadCredentials()
             ?: return AutoUpdateOutcome.Failed(
                 FailureReason.CREDENTIALS_UNREADABLE,
                 "Saved DX NET credentials could not be decrypted and were removed; enter them again",
             )
-        var signedIn = false
-        val result = try {
-            gateway.importAll(region, reporter::progress)
-        } catch (_: AuthenticationRequiredException) {
-            reporter.progress("Signing in to DX NET…")
-            when (val signIn = gateway.signIn(region, credentials)) {
-                SignInResult.Success -> signedIn = true
-                is SignInResult.InvalidCredentials -> {
-                    val message = "DX NET rejected the saved SEGA ID or password (${signIn.message.trimEnd('.')}). " +
-                        "Automatic sign-in is paused until you update your credentials."
-                    store.markRejected(message)
-                    return AutoUpdateOutcome.Failed(FailureReason.WRONG_CREDENTIALS, message)
-                }
-                is SignInResult.Rejected -> return AutoUpdateOutcome.Failed(
-                    FailureReason.SITE_REJECTED,
-                    "DX NET refused sign-in: ${signIn.message}",
-                )
-                is SignInResult.PageChanged -> return AutoUpdateOutcome.Failed(
-                    FailureReason.SITE_CHANGED,
-                    "${signIn.message}. Sign in manually; MaiDex may need an update.",
-                )
+        reporter.progress("Signing in to DX NET…")
+        when (val result = signIn.signIn(region, credentials)) {
+            SignInResult.Success -> Unit
+            is SignInResult.InvalidCredentials -> {
+                val message = "DX NET rejected the saved SEGA ID or password (${result.message.trimEnd('.')}). " +
+                    "Automatic sign-in is paused until you update your credentials."
+                store.markRejected(message)
+                return AutoUpdateOutcome.Failed(FailureReason.WRONG_CREDENTIALS, message)
             }
-            try {
-                gateway.importAll(region, reporter::progress)
-            } catch (_: AuthenticationRequiredException) {
-                return AutoUpdateOutcome.Failed(
-                    FailureReason.SITE_CHANGED,
-                    "Signed in, but DX NET did not accept the session. Sign in manually; MaiDex may need an update.",
-                )
-            }
+            is SignInResult.Rejected -> return AutoUpdateOutcome.Failed(
+                FailureReason.SITE_REJECTED,
+                "DX NET refused sign-in: ${result.message}",
+            )
+            is SignInResult.PageChanged -> return AutoUpdateOutcome.Failed(
+                FailureReason.SITE_CHANGED,
+                "${result.message}. Sign in manually; MaiDex may need an update.",
+            )
         }
-        saveImport(result)
-        return AutoUpdateOutcome.Updated(
-            scores = result.scores.size,
-            recentDetails = result.playDetails.size,
-            unmatched = result.unmatchedCharts,
-            signedIn = signedIn,
-        )
+        return try {
+            AutoUpdateOutcome.Updated(refresh.refresh(region, reporter::progress), signedIn = true)
+        } catch (_: AuthenticationRequiredException) {
+            AutoUpdateOutcome.Failed(
+                FailureReason.SITE_CHANGED,
+                "Signed in, but DX NET did not accept the session. Sign in manually; MaiDex may need an update.",
+            )
+        }
     }
 
     companion object {
         const val DEFAULT_MIN_INTERVAL_MILLIS = 15L * 60L * 1000L
+        private val attemptLock = Mutex()
     }
 }

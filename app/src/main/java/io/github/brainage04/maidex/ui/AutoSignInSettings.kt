@@ -86,7 +86,8 @@ internal fun AutoSignInCard(
                     Text("Automatic sign-in", fontWeight = FontWeight.Bold)
                     Text(
                         "Sign in with your SEGA ID and update your data in the background whenever " +
-                            "MaiDex opens. International DX NET only.",
+                            "MaiDex opens, and when hourly tracking finds your session expired. " +
+                            "International DX NET only.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
