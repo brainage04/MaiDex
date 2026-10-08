@@ -21,6 +21,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Opening (or returning to) the app triggers the opt-in automatic DX NET update; the
+        // worker itself throttles, so this is cheap when it is disabled or ran recently.
+        viewModel.requestAutoUpdateOnAppOpen()
+    }
+
     override fun onResume() {
         super.onResume()
         viewModel.refreshTrackingData()

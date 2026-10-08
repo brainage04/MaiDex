@@ -24,6 +24,7 @@ The app is a Kotlin/Jetpack Compose application with a small MVVM-style data flo
 - `UserDataRepository` stores imported scores, play details, profile data, and tracking snapshots locally.
 - `MaimaiDxClient` uses OkHttp and Jsoup to read authenticated DX NET pages.
 - `CircleTrackingWorker` schedules authenticated hourly tracking through WorkManager.
+- `autologin/` holds the opt-in automatic sign-in: `AutoLoginStore` + `AndroidKeystoreCipher` (encrypted credentials), `SegaIdSignIn` (SEGA ID form login), `AutoUpdateRunner` (sign-in/import policy), and `AutoUpdateWorker` (background run and notifications).
 
 There is no project-owned backend service. DX NET authentication is performed in an Android WebView, and imported account data is stored on the device. Profile images are cached only from allowlisted official DX NET hosts.
 
@@ -94,9 +95,9 @@ tools/                Auxiliary development tools
 - The DX NET parser depends on the structure of the official HTML pages and may require updates if those pages change.
 - Circle layouts retain official styles and image layers, with scripts, forms, account controls, and site navigation removed. Static assets are fetched without account cookies and cached; first viewing requires network access. Existing imports need one sync to capture these layouts.
 - DX NET session cookies are refreshed per response, including redirects. Expired sessions require sign-in again; a transport connection abort does not by itself indicate authentication expiry.
+- Automatic sign-in is **off by default**. When enabled (DX NET account → Automatic sign-in), the SEGA ID and password are encrypted with AES-256-GCM using a non-exportable Android Keystore key and stored in the `dx-net-auto-login` preferences file, which is excluded from cloud backup and device transfer. They are only posted to SEGA's Aime gateway (`lng-tgk-aime-gw.am-all.net`) over HTTPS. *Forget credentials* (or removing imported account data) deletes them and the key.
+- On each app open, `AutoUpdateWorker` first tries the existing session, signs in with the SEGA ID at most once if it has expired, then imports in the background with a notification (and in-app message) marking start and end. Attempts are throttled to one per 15 minutes; a wrong password pauses automatic sign-in until new credentials are saved, so SEGA never sees repeated bad logins. Network and site-change failures are reported and not retried. Only International (maimaidx-eng.com) accounts are supported; X/Twitter, Facebook, and LINE logins cannot be automated and still use the WebView sign-in.
 
-## CI direction
+## CI
 
-A top-level CI workflow should run on pushes and pull requests, install JDK 17 and Android SDK 36, then run the unit tests and debug build. Instrumentation tests and baseline-profile generation should be a separate device-backed job rather than a required host-only job.
-
-The repository does not currently include a checked-in GitHub Actions workflow.
+`.github/workflows/ci.yml` runs on pushes to `main` and on pull requests: it installs JDK 17 and Android SDK 36, then runs `:app:testDebugUnitTest :app:assembleDebug` and uploads the debug APK. Instrumentation tests (`:app:connectedDebugAndroidTest`, including the real Android Keystore credential test) and baseline-profile generation need a device or emulator and are not part of CI.

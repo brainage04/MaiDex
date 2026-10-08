@@ -2,9 +2,14 @@ package io.github.brainage04.maidex.data
 
 import java.time.Instant
 
-enum class AccountRegion(val label: String, val baseUrl: String) {
-    JAPAN("Japan", "https://maimaidx.jp"),
-    INTERNATIONAL("International", "https://maimaidx-eng.com"),
+enum class AccountRegion(
+    val label: String,
+    val baseUrl: String,
+    /** Whether MaiDex can sign in with a SEGA ID form login (automatic sign-in). */
+    val supportsSegaIdLogin: Boolean,
+) {
+    JAPAN("Japan", "https://maimaidx.jp", supportsSegaIdLogin = false),
+    INTERNATIONAL("International", "https://maimaidx-eng.com", supportsSegaIdLogin = true),
     ;
 
     val loginUrl: String get() = "$baseUrl/maimai-mobile/"

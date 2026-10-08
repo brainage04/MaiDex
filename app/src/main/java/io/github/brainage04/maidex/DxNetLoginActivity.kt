@@ -122,13 +122,20 @@ class DxNetLoginActivity : ComponentActivity() {
         if (uri.scheme == "intent") {
             val intentUri = runCatching { Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME) }.getOrNull()
             val fallback = intentUri?.getStringExtra("browser_fallback_url")
-            if (!fallback.isNullOrBlank()) {
+            if (!fallback.isNullOrBlank() && (fallback.startsWith("https://") || fallback.startsWith("http://"))) {
                 webView.loadUrl(fallback)
                 return
             }
-            if (intentUri != null && runCatching { startActivity(intentUri) }.isSuccess) return
+            // Web content must not target a specific (possibly non-exported) component or smuggle a
+            // selector: only let it open apps that accept browsable links.
+            intentUri?.apply {
+                component = null
+                selector = null
+                addCategory(Intent.CATEGORY_BROWSABLE)
+            }?.let { safeIntent -> runCatching { startActivity(safeIntent) } }
+            return
         }
-        runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)) }
     }
 
     override fun onDestroy() {

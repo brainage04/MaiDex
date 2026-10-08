@@ -16,6 +16,7 @@ import io.github.brainage04.maidex.network.MaimaiDxClient
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 
 class CircleTrackingWorker(
     appContext: Context,
@@ -34,6 +35,8 @@ class CircleTrackingWorker(
                 repository.recordTrackingSuccess()
             }
             Result.success()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (failure: Exception) {
             repository.recordTrackingFailure(
                 failure.message ?: "Unable to refresh DX NET tracking data",

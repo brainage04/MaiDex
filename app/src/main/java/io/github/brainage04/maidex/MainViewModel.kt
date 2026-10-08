@@ -28,6 +28,15 @@ import io.github.brainage04.maidex.data.normalizeSearch
 import io.github.brainage04.maidex.tracking.CircleTrackingScheduler
 import io.github.brainage04.maidex.data.builtInFilterPresets
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import io.github.brainage04.maidex.autologin.AutoLoginStore
+import io.github.brainage04.maidex.autologin.AutoUpdateScheduler
+import io.github.brainage04.maidex.autologin.AutoUpdateWorker
+import io.github.brainage04.maidex.autologin.DxNetCredentials
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,6 +64,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val playCountSnapshots = MutableStateFlow<List<PlayCountSnapshot>>(emptyList())
     private val trackingSettings = MutableStateFlow(TrackingSettings())
     private val customFilterPresets = MutableStateFlow<List<FilterPreset>>(emptyList())
+    private val autoLoginStore = AutoLoginStore.create(application)
+    private val autoLoginState = MutableStateFlow(AutoLoginUiState())
+    val autoLogin: StateFlow<AutoLoginUiState> = autoLoginState
+    private val autoUpdateEvents = Channel<String>(Channel.BUFFERED)
+
+    /** One-off in-app messages marking the start and end of an automatic update; buffered until shown. */
+    val autoUpdateMessages: Flow<String> = autoUpdateEvents.receiveAsFlow()
 
     private val trackingData = combine(
         circleHistory,
@@ -174,17 +190,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .onFailure { failure -> error.value = failure.message ?: "Unable to load catalog" }
         }
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                scores.value = userRepository.loadScores()
-                playDetails.value = userRepository.loadPlayDetails()
-                profile.value = userRepository.loadProfile()
-                customFilterPresets.value = userRepository.loadFilterPresets()
-            }
-            reloadTrackingData()
+            reloadUserData()
             if (profile.value != null) {
                 CircleTrackingScheduler.schedule(application)
             }
         }
+        viewModelScope.launch { reloadAutoLoginState() }
+        viewModelScope.launch { observeAutoUpdates() }
+    }
+
+    private suspend fun reloadUserData() {
+        withContext(Dispatchers.IO) {
+            scores.value = userRepository.loadScores()
+            playDetails.value = userRepository.loadPlayDetails()
+            profile.value = userRepository.loadProfile()
+            customFilterPresets.value = userRepository.loadFilterPresets()
+        }
+        reloadTrackingData()
     }
 
     fun setSearch(value: String) {
@@ -278,7 +300,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearAccount() {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { userRepository.clear() }
+            AutoUpdateScheduler.cancel(getApplication())
+            withContext(Dispatchers.IO) {
+                userRepository.clear()
+                autoLoginStore.forget()
+            }
             scores.value = emptyMap()
             playDetails.value = emptyMap()
             profile.value = null
@@ -288,7 +314,109 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             playCountSnapshots.value = emptyList()
             trackingSettings.value = TrackingSettings()
             CircleTrackingScheduler.cancel(getApplication())
+            reloadAutoLoginState()
         }
+    }
+
+    /** Called whenever the app comes to the foreground; does nothing unless the user opted in. */
+    fun requestAutoUpdateOnAppOpen() {
+        viewModelScope.launch {
+            val enabled = withContext(Dispatchers.IO) { autoLoginStore.isEnabled }
+            if (enabled) AutoUpdateScheduler.request(getApplication())
+        }
+    }
+
+    /** Encrypts and saves the credentials, turns automatic sign-in on, and starts an update now. */
+    fun saveAutoLoginCredentials(username: String, password: String) {
+        val credentials = runCatching { DxNetCredentials(username.trim(), password) }.getOrNull() ?: return
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                runCatching {
+                    autoLoginStore.saveCredentials(credentials)
+                    autoLoginStore.setEnabled(true)
+                }
+            }
+            saved.onFailure { failure ->
+                autoUpdateEvents.trySend("Couldn't store credentials securely: ${failure.message}")
+            }
+            reloadAutoLoginState()
+            if (saved.isSuccess) AutoUpdateScheduler.request(getApplication(), force = true)
+        }
+    }
+
+    /** Opt in or out. Opting out keeps saved credentials until [forgetAutoLoginCredentials]. */
+    fun setAutoLoginEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { autoLoginStore.setEnabled(enabled) }
+            if (enabled) AutoUpdateScheduler.request(getApplication()) else AutoUpdateScheduler.cancel(getApplication())
+            reloadAutoLoginState()
+        }
+    }
+
+    fun forgetAutoLoginCredentials() {
+        viewModelScope.launch {
+            AutoUpdateScheduler.cancel(getApplication())
+            withContext(Dispatchers.IO) { autoLoginStore.forget() }
+            reloadAutoLoginState()
+        }
+    }
+
+    private suspend fun reloadAutoLoginState() {
+        autoLoginState.value = withContext(Dispatchers.IO) {
+            AutoLoginUiState(
+                enabled = autoLoginStore.isEnabled,
+                username = autoLoginStore.savedUsername(),
+                pausedReason = autoLoginStore.rejectionMessage,
+                lastResult = autoLoginStore.lastResult,
+                supported = (userRepository.loadProfile()?.region ?: AccountRegion.INTERNATIONAL).supportsSegaIdLogin,
+            )
+        }
+    }
+
+    /** Mirrors the background worker into the in-app status and snackbar events. */
+    private suspend fun observeAutoUpdates() {
+        val observingSince = System.currentTimeMillis()
+        val announced = mutableSetOf<UUID>()
+        val handled = mutableSetOf<UUID>()
+        WorkManager.getInstance(getApplication())
+            .getWorkInfosForUniqueWorkFlow(AutoUpdateScheduler.WORK_NAME)
+            .collect { infos ->
+                val info = infos.lastOrNull() ?: return@collect
+                if (!info.state.isFinished) {
+                    val message = info.progress.getString(AutoUpdateWorker.KEY_MESSAGE) ?: return@collect
+                    importStatus.value = ImportStatus.Running(message)
+                    if (announced.add(info.id)) autoUpdateEvents.trySend(AutoUpdateWorker.STARTED_MESSAGE)
+                    return@collect
+                }
+                // React once per run, and only to runs that finished while this screen existed (a run
+                // can finish before its RUNNING state is ever observed), not to stale earlier results.
+                val finishedAt = info.outputData.getLong(AutoUpdateWorker.KEY_FINISHED_AT, 0L)
+                if (finishedAt < observingSince && info.id !in announced) return@collect
+                if (!handled.add(info.id)) return@collect
+                val output = info.outputData
+                val message = output.getString(AutoUpdateWorker.KEY_MESSAGE)
+                when (output.getString(AutoUpdateWorker.KEY_OUTCOME)) {
+                    AutoUpdateWorker.OUTCOME_UPDATED -> {
+                        reloadUserData()
+                        CircleTrackingScheduler.schedule(getApplication())
+                        importStatus.value = ImportStatus.Success(
+                            imported = output.getInt(AutoUpdateWorker.KEY_SCORES, 0),
+                            recentDetails = output.getInt(AutoUpdateWorker.KEY_RECENT, 0),
+                            unmatched = output.getInt(AutoUpdateWorker.KEY_UNMATCHED, 0),
+                        )
+                        autoUpdateEvents.trySend("DX NET data updated: ${message.orEmpty()}")
+                    }
+                    AutoUpdateWorker.OUTCOME_FAILED -> {
+                        importStatus.value = ImportStatus.Failure(message ?: "Automatic DX NET update failed")
+                        autoUpdateEvents.trySend("Automatic DX NET update failed: ${message.orEmpty()}")
+                    }
+                    else -> if (importStatus.value is ImportStatus.Running) importStatus.value = ImportStatus.Idle
+                }
+                if (info.state == WorkInfo.State.CANCELLED && importStatus.value is ImportStatus.Running) {
+                    importStatus.value = ImportStatus.Idle
+                }
+                reloadAutoLoginState()
+            }
     }
 
 
@@ -363,6 +491,13 @@ private data class TrackingData(
     val settings: TrackingSettings = TrackingSettings(),
 )
 
+data class AutoLoginUiState(
+    val enabled: Boolean = false,
+    val username: String? = null,
+    val pausedReason: String? = null,
+    val lastResult: String? = null,
+    val supported: Boolean = true,
+)
 sealed interface ImportStatus {
     data object Idle : ImportStatus
     data class Running(val message: String) : ImportStatus

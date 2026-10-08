@@ -1,6 +1,9 @@
 package io.github.brainage04.maidex.network
 
 import android.webkit.CookieManager
+import io.github.brainage04.maidex.autologin.DxNetCredentials
+import io.github.brainage04.maidex.autologin.SegaIdSignIn
+import io.github.brainage04.maidex.autologin.SignInResult
 import io.github.brainage04.maidex.data.AccountRegion
 import io.github.brainage04.maidex.data.CircleData
 import io.github.brainage04.maidex.data.CircleInfoItem
@@ -106,6 +109,24 @@ class MaimaiDxClient(
             playDetails = details,
             unmatchedCharts = scoreImport.unmatched,
             circle = account.circle,
+        )
+    }
+
+    /**
+     * Signs in with a SEGA ID, storing the resulting session in the shared WebView cookie store so
+     * the manual import, the hourly tracker, and the sign-in screen all see it.
+     */
+    suspend fun signInWithSegaId(
+        region: AccountRegion,
+        credentials: DxNetCredentials,
+    ): SignInResult = withContext(Dispatchers.IO) {
+        if (!region.supportsSegaIdLogin) {
+            return@withContext SignInResult.PageChanged("Automatic sign-in is not available for ${region.label} DX NET")
+        }
+        SegaIdSignIn(client).signIn(
+            entryUrl = region.loginUrl,
+            sitePrefix = region.loginUrl,
+            credentials = credentials,
         )
     }
 

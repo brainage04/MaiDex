@@ -133,6 +133,9 @@ import io.github.brainage04.maidex.DxNetLoginActivity
 import io.github.brainage04.maidex.CatalogUiState
 import io.github.brainage04.maidex.ImportStatus
 import io.github.brainage04.maidex.MainViewModel
+import io.github.brainage04.maidex.AutoLoginUiState
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import io.github.brainage04.maidex.R
 import io.github.brainage04.maidex.data.AccountRegion
 import io.github.brainage04.maidex.data.BestScore
@@ -184,6 +187,14 @@ import kotlinx.coroutines.launch
 fun MaiDexApp(viewModel: MainViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val filterPresets by viewModel.filterPresets.collectAsStateWithLifecycle()
+    val autoLogin by viewModel.autoLogin.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(viewModel) {
+        viewModel.autoUpdateMessages.collect { message ->
+            snackbarHostState.currentSnackbarData?.dismiss()
+            launch { snackbarHostState.showSnackbar(message, withDismissAction = true) }
+        }
+    }
     ReportDrawnWhen { !state.isLoading }
     var showFilters by remember { mutableStateOf(false) }
     var selectedChart by remember { mutableStateOf<SongChart?>(null) }
@@ -231,6 +242,9 @@ fun MaiDexApp(viewModel: MainViewModel) {
         ) {
                 Scaffold(
                     contentWindowInsets = WindowInsets(0),
+                    snackbarHost = {
+                        SnackbarHost(snackbarHostState, Modifier.navigationBarsPadding())
+                    },
                     topBar = {
                         CenterAlignedTopAppBar(
                             modifier = Modifier.statusBarsPadding(),
@@ -337,8 +351,12 @@ fun MaiDexApp(viewModel: MainViewModel) {
             profile = state.profile,
             importStatus = state.importStatus,
             playCountSnapshots = state.playCountSnapshots,
+            autoLogin = autoLogin,
             onImportData = viewModel::importData,
             onClear = viewModel::clearAccount,
+            onSaveAutoLoginCredentials = viewModel::saveAutoLoginCredentials,
+            onAutoLoginEnabledChange = viewModel::setAutoLoginEnabled,
+            onForgetAutoLoginCredentials = viewModel::forgetAutoLoginCredentials,
             onDismissStatus = viewModel::dismissImportStatus,
             onDismiss = { showAccount = false },
         )
@@ -2441,8 +2459,12 @@ private fun AccountDialog(
     profile: PlayerProfile?,
     importStatus: ImportStatus,
     playCountSnapshots: List<PlayCountSnapshot>,
+    autoLogin: AutoLoginUiState,
     onImportData: (AccountRegion) -> Unit,
     onClear: () -> Unit,
+    onSaveAutoLoginCredentials: (String, String) -> Unit,
+    onAutoLoginEnabledChange: (Boolean) -> Unit,
+    onForgetAutoLoginCredentials: () -> Unit,
     onDismissStatus: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -2469,7 +2491,11 @@ private fun AccountDialog(
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
         ) {
-            Column(Modifier.padding(16.dp)) {
+            Column(
+                Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -2643,12 +2669,27 @@ private fun AccountDialog(
                         Text("Import data", maxLines = 1)
                     }
                 }
-                if (profile != null) {
+                AutoSignInCard(
+                    state = autoLogin,
+                    busy = isImporting,
+                    onSaveCredentials = onSaveAutoLoginCredentials,
+                    onEnabledChange = onAutoLoginEnabledChange,
+                    onForget = onForgetAutoLoginCredentials,
+                )
+                if (profile != null || autoLogin.username != null) {
                     TextButton(
                         onClick = onClear,
                         enabled = !isImporting,
                         modifier = Modifier.align(Alignment.CenterHorizontally),
-                    ) { Text("Remove imported account data") }
+                    ) {
+                        Text(
+                            if (autoLogin.username != null) {
+                                "Remove imported account data and saved credentials"
+                            } else {
+                                "Remove imported account data"
+                            },
+                        )
+                    }
                 }
             }
         }
