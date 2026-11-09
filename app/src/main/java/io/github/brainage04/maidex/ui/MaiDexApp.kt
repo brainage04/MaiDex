@@ -218,9 +218,12 @@ fun MaiDexApp(viewModel: MainViewModel) {
     ReportDrawnWhen { !state.isLoading }
     val backStack = rememberSaveable(saver = AppBackStack.Saver) { AppBackStack() }
     val screenStates = rememberSaveableStateHolder()
-    // A closed screen forgets its state, so reopening it starts fresh as the old dialogs did.
+    // Saved UI state is keyed by stack position as well as screen, so the same chart opened twice in
+    // one stack keeps two states. A closed screen forgets its state, so reopening it starts fresh as
+    // the old dialogs did.
+    fun stateKey(index: Int, screen: AppScreen) = "$index:${screen.key}"
     val pop: () -> Unit = {
-        backStack.top?.let { screenStates.removeState(it.key) }
+        backStack.top?.let { screenStates.removeState(stateKey(backStack.entries.lastIndex, it)) }
         backStack.pop()
     }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -268,7 +271,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
                 }
             }
 
-            else -> screenStates.SaveableStateProvider(screen.key) {
+            else -> screenStates.SaveableStateProvider(stateKey(backStack.entries.lastIndex, screen)) {
                 when (screen) {
                     AppScreen.Filters -> FilterScreen(
                         filters = state.filters,
