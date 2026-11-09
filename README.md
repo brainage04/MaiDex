@@ -11,16 +11,18 @@ MaiDex is an Android companion app for **maimai DX** players. It combines an off
 - Import DX NET profile data, scores, medals, recent play history, and judgment details for Japan or International accounts.
 - Calculate chart ratings, total rating, rating milestones, achievement loss, and DX score loss.
 - View score statistics, medal tables, best scores, Dan course guides for all 11 DX releases from Splash PLUS to CiRCLE PLUS (including regional substitutions), Chiho/Class Battle unlock guides, and chart details.
+- Search the Dan courses of the selected version by course name or track, and the Chiho and Class Battle guides by area, version, unlock song or boss song; guide songs open their chart.
 - Track circle history and play counts with an hourly background sync; view read-only snapshots of the official Circle profile, points, challenge, Festa, reward, member, and ranking layouts.
+- Choose a Light, Dark, or System default theme in Settings.
 
 ## Architecture
 
 The app is a Kotlin/Jetpack Compose application with a small MVVM-style data flow:
 
-- `MainActivity` hosts the Compose UI.
-- `MaiDexApp` contains the catalog, chart detail, account, guide, statistics, and tracking screens.
+- `MainActivity` hosts the Compose UI and applies the theme chosen in Settings (`AppSettingsStore`).
+- `MaiDexApp` contains the catalog, chart detail, account, guide, statistics, settings, and tracking screens. Every screen above the catalog is a full-screen page on a small back stack (`AppNavigation.kt`: `AppScreen`, `AppBackStack`, `SecondaryScreen`), so screens can open each other and Back returns to the previous one.
 - `MainViewModel` combines catalog, filter, score, profile, import, and tracking state into `CatalogUiState`.
-- `CatalogRepository` installs and reads the bundled read-only catalog database.
+- `CatalogRepository` installs and reads the bundled read-only catalog database, and falls back to the bundled copy when the installed one cannot be opened.
 - `UserDataRepository` stores imported scores, play details, profile data, and tracking snapshots locally.
 - `MaimaiDxClient` uses OkHttp and Jsoup to read authenticated DX NET pages.
 - `CircleTrackingWorker` schedules authenticated hourly tracking through WorkManager.

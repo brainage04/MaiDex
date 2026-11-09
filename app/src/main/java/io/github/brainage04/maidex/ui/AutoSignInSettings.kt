@@ -10,8 +10,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -37,6 +42,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import io.github.brainage04.maidex.AutoLoginUiState
 
 /** Opt-in settings for signing in to DX NET automatically when the app opens. Off by default. */
@@ -169,6 +176,7 @@ internal fun AutoSignInCard(
     }
 }
 
+/** Full-screen form for the SEGA ID login used by automatic sign-in. */
 @Composable
 private fun CredentialsDialog(
     initialUsername: String,
@@ -178,15 +186,28 @@ private fun CredentialsDialog(
     var username by remember { mutableStateOf(initialUsername) }
     var password by remember { mutableStateOf("") }
     val valid = username.isNotBlank() && password.isNotEmpty()
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("SEGA ID sign-in") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        SecondaryScreen(
+            title = "SEGA ID sign-in",
+            onBack = onDismiss,
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(padding)
+                    .imePadding()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Text(
                     "Use the SEGA ID and password you use on the DX NET sign-in page. They are encrypted " +
                         "with a key kept in Android Keystore and only sent to SEGA's sign-in server.",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
                     value = username,
@@ -194,7 +215,9 @@ private fun CredentialsDialog(
                     label = { Text("SEGA ID") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Next),
-                    modifier = Modifier.testTag("sega-id-field"),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("sega-id-field"),
                 )
                 OutlinedTextField(
                     value = password,
@@ -203,13 +226,18 @@ private fun CredentialsDialog(
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                    modifier = Modifier.testTag("sega-password-field"),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("sega-password-field"),
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Button(onClick = { onSave(username, password) }, enabled = valid) { Text("Save and enable") }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(username, password) }, enabled = valid) { Text("Save and enable") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+        }
+    }
 }

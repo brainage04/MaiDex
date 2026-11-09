@@ -3,6 +3,7 @@ package io.github.brainage04.maidex.ui
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.ReportDrawnWhen
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -62,7 +63,17 @@ import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.ButtonDefaults
@@ -124,8 +135,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.ui.semantics.Role
+import io.github.brainage04.maidex.data.ThemeMode
+import io.github.brainage04.maidex.ui.theme.MaiDexTheme
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import io.github.brainage04.maidex.BuildConfig
@@ -188,6 +207,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val filterPresets by viewModel.filterPresets.collectAsStateWithLifecycle()
     val autoLogin by viewModel.autoLogin.collectAsStateWithLifecycle()
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(viewModel) {
         viewModel.autoUpdateMessages.collect { message ->
@@ -196,226 +216,287 @@ fun MaiDexApp(viewModel: MainViewModel) {
         }
     }
     ReportDrawnWhen { !state.isLoading }
-    var showFilters by remember { mutableStateOf(false) }
-    var selectedChart by remember { mutableStateOf<SongChart?>(null) }
-    var showAbout by remember { mutableStateOf(false) }
-    var showAccount by remember { mutableStateOf(false) }
-    var unlockGuideSection by remember { mutableStateOf<UnlockGuideSection?>(null) }
-    var showDanGuide by remember { mutableStateOf(false) }
-    var showScoreStats by remember { mutableStateOf(false) }
-    var showCircle by remember { mutableStateOf(false) }
-    var selectedUnlockGuideEntryId by remember { mutableStateOf<String?>(null) }
+    val backStack = rememberSaveable(saver = AppBackStack.Saver) { AppBackStack() }
+    val screenStates = rememberSaveableStateHolder()
+    // A closed screen forgets its state, so reopening it starts fresh as the old dialogs did.
+    val pop: () -> Unit = {
+        backStack.top?.let { screenStates.removeState(it.key) }
+        backStack.pop()
+    }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    val closeDrawerAndOpen: (() -> Unit) -> Unit = { open ->
+    val openFromDrawer: (AppScreen) -> Unit = { screen ->
         scope.launch {
             drawerState.close()
-            open()
+            backStack.push(screen)
         }
     }
+    val openGuideEntry: (String) -> Unit = { entryId ->
+        UnlockMetadata.guideEntry(entryId)?.let { entry ->
+            backStack.push(AppScreen.UnlockGuide(entry.section, entryId))
+        }
+    }
+    val openChart: (SongChart) -> Unit = { chart -> backStack.push(AppScreen.ChartDetail(chart.chartKey)) }
 
-        ModalNavigationDrawer(
-            drawerState = drawerState,
-            drawerContent = {
-                    AppDrawerContent(
-                        profile = state.profile,
-                        onClose = { scope.launch { drawerState.close() } },
-                        onAccount = { closeDrawerAndOpen { showAccount = true } },
-                        onCircle = { closeDrawerAndOpen { showCircle = true } },
-                        onScoreStats = { closeDrawerAndOpen { showScoreStats = true } },
-                        onDanGuide = { closeDrawerAndOpen { showDanGuide = true } },
-                        onChihoGuide = {
-                            closeDrawerAndOpen {
-                                selectedUnlockGuideEntryId = null
-                                unlockGuideSection = UnlockGuideSection.CHIHOS
-                            }
-                        },
-                        onClassBattleGuide = {
-                            closeDrawerAndOpen {
-                                selectedUnlockGuideEntryId = null
-                                unlockGuideSection = UnlockGuideSection.CLASS_BATTLES
-                            }
-                        },
-                        onAbout = { closeDrawerAndOpen { showAbout = true } },
-                    )
-            },
-        ) {
-                Scaffold(
-                    contentWindowInsets = WindowInsets(0),
-                    snackbarHost = {
-                        SnackbarHost(snackbarHostState, Modifier.navigationBarsPadding())
-                    },
-                    topBar = {
-                        CenterAlignedTopAppBar(
-                            modifier = Modifier.statusBarsPadding(),
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = MaterialTheme.colorScheme.background,
-                            ),
-                            navigationIcon = {
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Default.Menu, contentDescription = "Open navigation menu")
-                                }
-                            },
-                            title = {
-                                Text(
-                                    "MaiDex",
-                                    fontWeight = FontWeight.Black,
-                                    maxLines = 1,
-                                )
-                            },
-                            actions = {
-                                if (state.info != null) {
-                                    Text(
-                                        "${state.visibleSongCount} songs\n${state.charts.size} charts",
-                                        modifier = Modifier.padding(end = 12.dp),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = TextAlign.End,
-                                        maxLines = 2,
-                                    )
-                                }
-                            },
+    Box(Modifier.fillMaxSize()) {
+        when (val screen = backStack.top) {
+            null -> screenStates.SaveableStateProvider("catalog") {
+                // Back closes an open drawer instead of leaving the app.
+                BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+                ModalNavigationDrawer(
+                    drawerState = drawerState,
+                    drawerContent = {
+                        AppDrawerContent(
+                            profile = state.profile,
+                            onClose = { scope.launch { drawerState.close() } },
+                            onOpen = openFromDrawer,
                         )
                     },
-                ) { padding ->
-                    when {
-                        state.isLoading -> Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(padding),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            CircularProgressIndicator()
-                        }
+                ) {
+                    CatalogRoot(
+                        state = state,
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onRetry = viewModel::loadCatalog,
+                        onSearch = viewModel::setSearch,
+                        onSort = viewModel::setSort,
+                        onToggleSortOrder = viewModel::toggleSortOrder,
+                        onOpenFilters = { backStack.push(AppScreen.Filters) },
+                        onClearFilters = viewModel::clearFilters,
+                        onChart = openChart,
+                        onUnlockGuide = openGuideEntry,
+                    )
+                }
+            }
 
-                        state.error != null -> Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(state.error.orEmpty(), color = MaterialTheme.colorScheme.error)
-                        }
+            else -> screenStates.SaveableStateProvider(screen.key) {
+                when (screen) {
+                    AppScreen.Filters -> FilterScreen(
+                        filters = state.filters,
+                        sort = state.sort,
+                        sortOrder = state.sortOrder,
+                        options = state.options,
+                        presets = filterPresets,
+                        hasScores = state.scores.isNotEmpty(),
+                        onBack = pop,
+                        onApply = { appliedFilters, appliedSort, appliedSortOrder ->
+                            viewModel.applyFilters(appliedFilters, appliedSort, appliedSortOrder)
+                            pop()
+                        },
+                        onSavePreset = viewModel::saveFilterPreset,
+                        onDeletePreset = viewModel::deleteFilterPreset,
+                    )
 
-                        else -> CatalogContent(
-                            state = state,
-                            modifier = Modifier.padding(padding),
-                            onSearch = viewModel::setSearch,
-                            onSort = viewModel::setSort,
-                            onToggleSortOrder = viewModel::toggleSortOrder,
-                            onOpenFilters = { showFilters = true },
-                            onClearFilters = viewModel::clearFilters,
-                            onChart = { selectedChart = it },
-                            onUnlockGuide = { entryId ->
-                                selectedUnlockGuideEntryId = entryId
-                                unlockGuideSection = UnlockMetadata.guideEntry(entryId)?.section
-                            },
+                    is AppScreen.ChartDetail -> {
+                        val chart = remember(state.allCharts, screen.chartKey) {
+                            state.allCharts.firstOrNull { it.chartKey == screen.chartKey }
+                        }
+                        when {
+                            chart != null -> ChartDetailScreen(
+                                chart = chart,
+                                score = state.scores[chart.chartKey],
+                                playDetail = state.playDetails[chart.chartKey],
+                                state = state,
+                                onBack = pop,
+                                onOpenGuide = openGuideEntry,
+                            )
+                            state.isLoading -> LoadingScreen(onBack = pop)
+                            else -> LaunchedEffect(screen) { pop() }
+                        }
+                    }
+
+                    AppScreen.Account -> AccountScreen(
+                        profile = state.profile,
+                        importStatus = state.importStatus,
+                        playCountSnapshots = state.playCountSnapshots,
+                        autoLogin = autoLogin,
+                        onImportData = viewModel::importData,
+                        onClear = viewModel::clearAccount,
+                        onSaveAutoLoginCredentials = viewModel::saveAutoLoginCredentials,
+                        onAutoLoginEnabledChange = viewModel::setAutoLoginEnabled,
+                        onForgetAutoLoginCredentials = viewModel::forgetAutoLoginCredentials,
+                        onOpenProfileCard = { backStack.push(AppScreen.ProfileCard) },
+                        onOpenPlayCountHistory = { backStack.push(AppScreen.PlayCountHistory) },
+                        onBack = {
+                            viewModel.dismissImportStatus()
+                            pop()
+                        },
+                    )
+
+                    AppScreen.ProfileCard -> {
+                        val profile = state.profile
+                        if (profile != null) {
+                            ProfileCardScreen(profile = profile, onBack = pop)
+                        } else {
+                            LaunchedEffect(screen) { pop() }
+                        }
+                    }
+
+                    AppScreen.PlayCountHistory -> PlayCountHistoryScreen(
+                        snapshots = state.playCountSnapshots,
+                        onBack = pop,
+                    )
+
+                    AppScreen.Circle -> CircleScreen(
+                        history = state.circleHistory,
+                        snapshots = state.circleSnapshots,
+                        trackingSettings = state.trackingSettings,
+                        importStatus = state.importStatus,
+                        onSync = {
+                            viewModel.importData(state.profile?.region ?: AccountRegion.INTERNATIONAL)
+                        },
+                        onOpenAccount = { backStack.push(AppScreen.Account) },
+                        onBack = pop,
+                    )
+
+                    AppScreen.ScoreStats -> ScoreStatsScreen(
+                        charts = state.allCharts,
+                        scores = state.scores,
+                        onBack = pop,
+                        onChart = openChart,
+                        onOpenAccount = { backStack.push(AppScreen.Account) },
+                    )
+
+                    is AppScreen.UnlockGuide -> UnlockGuideScreen(
+                        section = screen.section,
+                        initialEntryId = screen.entryId,
+                        charts = state.allCharts,
+                        scores = state.scores,
+                        profile = state.profile,
+                        onBack = pop,
+                        onChart = openChart,
+                    )
+
+                    AppScreen.DanGuide -> {
+                        val danChartLookup = remember(state.allCharts) {
+                            DanCourseMetadata.chartLookup(state.allCharts)
+                        }
+                        DanGuideScreen(
+                            chartLookup = danChartLookup,
+                            initialRegion = state.profile?.region ?: AccountRegion.INTERNATIONAL,
+                            onBack = pop,
+                            onChart = openChart,
                         )
                     }
-                }
-        }
 
-    if (showFilters) {
-        FilterDialog(
-            filters = state.filters,
-            sort = state.sort,
-            sortOrder = state.sortOrder,
-            options = state.options,
-            presets = filterPresets,
-            hasScores = state.scores.isNotEmpty(),
-            onDismiss = { showFilters = false },
-            onApply = { appliedFilters, appliedSort, appliedSortOrder ->
-                viewModel.applyFilters(appliedFilters, appliedSort, appliedSortOrder)
-                showFilters = false
-            },
-            onSavePreset = viewModel::saveFilterPreset,
-            onDeletePreset = viewModel::deleteFilterPreset,
-        )
-    }
-    selectedChart?.let { chart ->
-        ChartDetailDialog(
-            chart = chart,
-            score = state.scores[chart.chartKey],
-            playDetail = state.playDetails[chart.chartKey],
-            state = state,
-            onDismiss = { selectedChart = null },
-            onOpenGuide = { entryId ->
-                selectedChart = null
-                selectedUnlockGuideEntryId = entryId
-                unlockGuideSection = UnlockMetadata.guideEntry(entryId)?.section
-            },
-        )
-    }
-    if (showAccount) {
-        AccountDialog(
-            profile = state.profile,
-            importStatus = state.importStatus,
-            playCountSnapshots = state.playCountSnapshots,
-            autoLogin = autoLogin,
-            onImportData = viewModel::importData,
-            onClear = viewModel::clearAccount,
-            onSaveAutoLoginCredentials = viewModel::saveAutoLoginCredentials,
-            onAutoLoginEnabledChange = viewModel::setAutoLoginEnabled,
-            onForgetAutoLoginCredentials = viewModel::forgetAutoLoginCredentials,
-            onDismissStatus = viewModel::dismissImportStatus,
-            onDismiss = { showAccount = false },
-        )
-    }
-    if (showCircle) {
-        CircleDialog(
-            history = state.circleHistory,
-            snapshots = state.circleSnapshots,
-            trackingSettings = state.trackingSettings,
-            importStatus = state.importStatus,
-            onSync = {
-                viewModel.importData(state.profile?.region ?: AccountRegion.INTERNATIONAL)
-            },
-            onDismiss = { showCircle = false },
-        )
-    }
-    if (showScoreStats) {
-        ScoreStatsDialog(
-            charts = state.allCharts,
-            scores = state.scores,
-            onDismiss = { showScoreStats = false },
-            onChart = { chart ->
-                showScoreStats = false
-                selectedChart = chart
-            },
-        )
-    }
-    unlockGuideSection?.let { section ->
-        UnlockGuideDialog(
-            section = section,
-            initialEntryId = selectedUnlockGuideEntryId,
-            charts = state.allCharts,
-            scores = state.scores,
-            profile = state.profile,
-            onDismiss = {
-                unlockGuideSection = null
-                selectedUnlockGuideEntryId = null
-            },
-        )
-    }
-    if (showDanGuide) {
-        val danChartLookup = remember(state.allCharts) {
-            DanCourseMetadata.chartLookup(state.allCharts)
+                    AppScreen.About -> AboutScreen(info = state.info, onBack = pop)
+
+                    AppScreen.Settings -> SettingsScreen(
+                        themeMode = themeMode,
+                        onThemeModeChange = viewModel::setThemeMode,
+                        onBack = pop,
+                    )
+                }
+            }
         }
-        DanGuideDialog(
-            chartLookup = danChartLookup,
-            initialRegion = state.profile?.region ?: AccountRegion.INTERNATIONAL,
-            onDismiss = { showDanGuide = false },
-            onChart = { chart ->
-                showDanGuide = false
-                selectedChart = chart
-            },
+        SnackbarHost(
+            snackbarHostState,
+            Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding(),
         )
     }
-    if (showAbout) {
-        InfoDialog(
-            info = state.info,
-            onDismiss = { showAbout = false },
-        )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CatalogRoot(
+    state: CatalogUiState,
+    onOpenDrawer: () -> Unit,
+    onRetry: () -> Unit,
+    onSearch: (String) -> Unit,
+    onSort: (ChartSort) -> Unit,
+    onToggleSortOrder: () -> Unit,
+    onOpenFilters: () -> Unit,
+    onClearFilters: () -> Unit,
+    onChart: (SongChart) -> Unit,
+    onUnlockGuide: (String) -> Unit,
+) {
+    Scaffold(
+        contentWindowInsets = WindowInsets(0),
+        topBar = {
+            CenterAlignedTopAppBar(
+                modifier = Modifier.statusBarsPadding(),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+                navigationIcon = {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(Icons.Default.Menu, contentDescription = "Open navigation menu")
+                    }
+                },
+                title = {
+                    Text(
+                        "MaiDex",
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                    )
+                },
+                actions = {
+                    if (state.info != null) {
+                        Text(
+                            "${state.visibleSongCount} songs\n${state.charts.size} charts",
+                            modifier = Modifier.padding(end = 12.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.End,
+                            maxLines = 2,
+                        )
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        when {
+            state.isLoading -> Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+
+            state.error != null -> Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center,
+            ) {
+                EmptyState(
+                    icon = Icons.Default.ErrorOutline,
+                    title = "The song catalog could not be opened",
+                    body = "${state.error} The menu still opens your account, guides and settings.",
+                ) {
+                    Button(onClick = onRetry) {
+                        Icon(Icons.Default.Refresh, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Try again")
+                    }
+                    TextButton(onClick = onOpenDrawer) { Text("Open menu") }
+                }
+            }
+
+            else -> CatalogContent(
+                state = state,
+                modifier = Modifier.padding(padding),
+                onSearch = onSearch,
+                onSort = onSort,
+                onToggleSortOrder = onToggleSortOrder,
+                onOpenFilters = onOpenFilters,
+                onClearFilters = onClearFilters,
+                onChart = onChart,
+                onUnlockGuide = onUnlockGuide,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoadingScreen(onBack: () -> Unit) {
+    SecondaryScreen(title = "Loading…", onBack = onBack) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
     }
 }
 
@@ -423,13 +504,7 @@ fun MaiDexApp(viewModel: MainViewModel) {
 private fun AppDrawerContent(
     profile: PlayerProfile?,
     onClose: () -> Unit,
-    onAccount: () -> Unit,
-    onCircle: () -> Unit,
-    onScoreStats: () -> Unit,
-    onDanGuide: () -> Unit,
-    onChihoGuide: () -> Unit,
-    onClassBattleGuide: () -> Unit,
-    onAbout: () -> Unit,
+    onOpen: (AppScreen) -> Unit,
 ) {
     ModalDrawerSheet(
         modifier = Modifier
@@ -465,7 +540,7 @@ private fun AppDrawerContent(
         NavigationDrawerItem(
             label = { Text("DX NET account") },
             selected = false,
-            onClick = onAccount,
+            onClick = { onOpen(AppScreen.Account) },
             icon = {
                 if (profile?.avatarUrl.isNullOrBlank()) {
                     Icon(Icons.Default.AccountCircle, contentDescription = null)
@@ -478,14 +553,14 @@ private fun AppDrawerContent(
         NavigationDrawerItem(
             label = { Text("Circle data") },
             selected = false,
-            onClick = onCircle,
+            onClick = { onOpen(AppScreen.Circle) },
             icon = { Icon(Icons.Default.Groups, contentDescription = null) },
             modifier = Modifier.padding(horizontal = 12.dp),
         )
         NavigationDrawerItem(
             label = { Text("Score stats") },
             selected = false,
-            onClick = onScoreStats,
+            onClick = { onOpen(AppScreen.ScoreStats) },
             icon = { Icon(Icons.Default.BarChart, contentDescription = null) },
             modifier = Modifier.padding(horizontal = 12.dp),
         )
@@ -493,30 +568,37 @@ private fun AppDrawerContent(
         NavigationDrawerItem(
             label = { Text("Dan courses") },
             selected = false,
-            onClick = onDanGuide,
+            onClick = { onOpen(AppScreen.DanGuide) },
             icon = { Icon(Icons.Default.MilitaryTech, contentDescription = null) },
             modifier = Modifier.padding(horizontal = 12.dp),
         )
         NavigationDrawerItem(
             label = { Text("Chiho guides") },
             selected = false,
-            onClick = onChihoGuide,
+            onClick = { onOpen(AppScreen.UnlockGuide(UnlockGuideSection.CHIHOS)) },
             icon = { Icon(Icons.Default.Map, contentDescription = null) },
             modifier = Modifier.padding(horizontal = 12.dp),
         )
         NavigationDrawerItem(
             label = { Text("Class Battle guides") },
             selected = false,
-            onClick = onClassBattleGuide,
+            onClick = { onOpen(AppScreen.UnlockGuide(UnlockGuideSection.CLASS_BATTLES)) },
             icon = { Icon(Icons.Default.Groups, contentDescription = null) },
             modifier = Modifier.padding(horizontal = 12.dp),
         )
         Spacer(Modifier.weight(1f))
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         NavigationDrawerItem(
+            label = { Text("Settings") },
+            selected = false,
+            onClick = { onOpen(AppScreen.Settings) },
+            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+        NavigationDrawerItem(
             label = { Text("About MaiDex") },
             selected = false,
-            onClick = onAbout,
+            onClick = { onOpen(AppScreen.About) },
             icon = { Icon(Icons.Default.Info, contentDescription = null) },
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 16.dp),
         )
@@ -524,81 +606,74 @@ private fun AppDrawerContent(
 }
 
 @Composable
-private fun InfoDialog(
+private fun AboutScreen(
     info: CatalogInfo?,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Column {
-                Text("Info")
-                Text(
-                    "MaiDex ${BuildConfig.VERSION_NAME}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+    SecondaryScreen(
+        title = "About MaiDex",
+        subtitle = "Version ${BuildConfig.VERSION_NAME}",
+        onBack = onBack,
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(padding)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    InfoMetric(
-                        value = (info?.songCount ?: 0).toString(),
-                        label = "Songs",
-                        modifier = Modifier.weight(1f),
-                    )
-                    InfoMetric(
-                        value = (info?.chartCount ?: 0).toString(),
-                        label = "Charts",
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                InfoSection(
-                    title = "Offline catalog",
-                    body = "MaiDex starts with a bundled catalog, then checks arcade-songs every hour. " +
-                        "A changed source is rebuilt into a validated local database and becomes active " +
-                        "on the next app launch; the current catalog always remains available offline.",
+                InfoMetric(
+                    value = (info?.songCount ?: 0).toString(),
+                    label = "Songs",
+                    modifier = Modifier.weight(1f),
                 )
-                InfoSection(
-                    title = "Catalog freshness",
-                    body = "arcade-songs does not publish a fixed update schedule. " +
-                        if ((info?.lastCheckedAt ?: 0L) > 0L) {
-                            "MaiDex last checked the published dataset " +
-                                "${formatTrackedTime(info?.lastCheckedAt ?: 0L)}."
-                        } else {
-                            "MaiDex will check the published dataset when Android next runs the hourly updater."
-                        },
-                )
-                InfoSection(
-                    title = "DX NET and privacy",
-                    body = "Sign-in happens on the official DX NET site. Imported scores, recent-play " +
-                        "details, circle history, play-count snapshots, cookies, and cached artwork stay " +
-                        "in app-private storage on this device. MaiDex does not store your SEGA ID password.",
-                )
-                InfoSection(
-                    title = "Hourly DX NET tracking",
-                    body = "MaiDex asks Android to refresh circle, member, profile, and play-count data once " +
-                        "per hour while the saved session remains valid. Android may defer exact timing for " +
-                        "battery or network reasons; DX NET cannot backfill unavailable history.",
-                )
-                InfoSection(
-                    title = "Images and matching",
-                    body = "Cover art is cached after viewing, and profile/circle artwork is cached after import. " +
-                        "DX NET scores are matched by song, chart type, difficulty, and level. A source change " +
-                        "is downloaded hourly and used after the next app launch.",
+                InfoMetric(
+                    value = (info?.chartCount ?: 0).toString(),
+                    label = "Charts",
+                    modifier = Modifier.weight(1f),
                 )
             }
-        },
-        dismissButton = {
-            TextButton(
+            InfoSection(
+                title = "Offline catalog",
+                body = "MaiDex starts with a bundled catalog, then checks arcade-songs every hour. " +
+                    "A changed source is rebuilt into a validated local database and becomes active " +
+                    "on the next app launch; the current catalog always remains available offline.",
+            )
+            InfoSection(
+                title = "Catalog freshness",
+                body = "arcade-songs does not publish a fixed update schedule. " +
+                    if ((info?.lastCheckedAt ?: 0L) > 0L) {
+                        "MaiDex last checked the published dataset " +
+                            "${formatTrackedTime(info?.lastCheckedAt ?: 0L)}."
+                    } else {
+                        "MaiDex will check the published dataset when Android next runs the hourly updater."
+                    },
+            )
+            InfoSection(
+                title = "DX NET and privacy",
+                body = "Sign-in happens on the official DX NET site. Imported scores, recent-play " +
+                    "details, circle history, play-count snapshots, cookies, and cached artwork stay " +
+                    "in app-private storage on this device. MaiDex does not store your SEGA ID password.",
+            )
+            InfoSection(
+                title = "Hourly DX NET tracking",
+                body = "MaiDex asks Android to refresh circle, member, profile, and play-count data once " +
+                    "per hour while the saved session remains valid. Android may defer exact timing for " +
+                    "battery or network reasons; DX NET cannot backfill unavailable history.",
+            )
+            InfoSection(
+                title = "Images and matching",
+                body = "Cover art is cached after viewing, and profile/circle artwork is cached after import. " +
+                    "DX NET scores are matched by song, chart type, difficulty, and level. A source change " +
+                    "is downloaded hourly and used after the next app launch.",
+            )
+            OutlinedButton(
                 onClick = {
                     context.startActivity(
                         Intent(
@@ -607,10 +682,67 @@ private fun InfoDialog(
                         ),
                     )
                 },
-            ) { Text("Data source") }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Data source")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit,
+    onBack: () -> Unit,
+) {
+    SecondaryScreen(title = "Settings", onBack = onBack) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(padding)
+                .padding(vertical = 8.dp),
+        ) {
+            Text(
+                "Theme",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Column(Modifier.selectableGroup()) {
+                ThemeMode.entries.forEach { mode ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = mode == themeMode,
+                                onClick = { onThemeModeChange(mode) },
+                                role = Role.RadioButton,
+                            )
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = mode == themeMode, onClick = null)
+                        Spacer(Modifier.width(16.dp))
+                        Column {
+                            Text(mode.label, style = MaterialTheme.typography.bodyLarge)
+                            if (mode == ThemeMode.SYSTEM) {
+                                Text(
+                                    "Follow Android's dark theme setting",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -800,9 +932,22 @@ private fun CatalogContent(
         Spacer(Modifier.height(2.dp))
         if (state.charts.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("No matching charts", style = MaterialTheme.typography.titleLarge)
-                    TextButton(onClick = onClearFilters) { Text("Clear filters") }
+                EmptyState(
+                    icon = Icons.Default.SearchOff,
+                    title = "No matching charts",
+                    body = when {
+                        state.filters.search.isNotBlank() && state.filters.activeCount > 0 ->
+                            "Nothing matches “${state.filters.search}” with the current filters."
+                        state.filters.search.isNotBlank() -> "Nothing matches “${state.filters.search}”."
+                        else -> "No chart passes the current filters."
+                    },
+                ) {
+                    if (state.filters.search.isNotBlank()) {
+                        TextButton(onClick = { onSearch("") }) { Text("Clear search") }
+                    }
+                    if (state.filters.activeCount > 0) {
+                        TextButton(onClick = onClearFilters) { Text("Clear filters") }
+                    }
                 }
             }
         } else {
@@ -923,7 +1068,7 @@ private fun ChartCard(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFB)),
+        colors = CardDefaults.cardColors(containerColor = MaiDexTheme.colors.chartCard),
         border = BorderStroke(3.dp, accentColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
     ) {
@@ -961,7 +1106,7 @@ private fun ChartCard(
                     ).joinToString(" · "),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF17344E),
+                    color = MaiDexTheme.colors.chartMeta,
                     textAlign = TextAlign.End,
                 )
             }
@@ -1001,14 +1146,10 @@ private fun ChartCard(
                         color = Color.White,
                     )
                     Text(
-                        buildString {
-                            append("Lv")
-                            append(chart.level ?: "?")
-                            chart.constant?.let {
-                                append(" · C")
-                                append(String.format(Locale.US, "%.1f", it))
-                            }
-                        },
+                        listOfNotNull(
+                            chart.level?.let { "Lv$it" },
+                            chart.constant?.let { "C${String.format(Locale.US, "%.1f", it)}" },
+                        ).joinToString(" · "),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
                         color = Color.White,
@@ -1046,23 +1187,23 @@ private fun ChartCard(
             } else {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = Color(0xFFEEF1F3),
+                    color = MaiDexTheme.colors.panel,
                     shape = RoundedCornerShape(5.dp),
-                    border = BorderStroke(1.dp, Color(0xFFAEB9C0)),
+                    border = BorderStroke(1.dp, MaiDexTheme.colors.panelBorder),
                 ) {
                     Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
                         Text(
                             "No imported DX NET score",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF32434D),
+                            color = MaiDexTheme.colors.inkSoft,
                         )
                         chart.noteDesigner?.takeIf(String::isNotBlank)?.let { designer ->
                             Text(
                                 "NOTES DESIGNER · " +
                                     titleWithRomanization(designer, chart.noteDesignerRomanized),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF4E5E67),
+                                color = MaiDexTheme.colors.inkMuted,
                             )
                         }
                     }
@@ -1089,7 +1230,7 @@ private fun DxNetScorePanel(
         modifier = Modifier.fillMaxWidth(),
         color = scorePanelColor(score.grade),
         shape = RoundedCornerShape(5.dp),
-        border = BorderStroke(1.dp, Color(0xFF8D999F)),
+        border = BorderStroke(1.dp, MaiDexTheme.colors.scoreBorder),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
@@ -1105,7 +1246,7 @@ private fun DxNetScorePanel(
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
-                    color = Color(0xFF172126),
+                    color = MaiDexTheme.colors.ink,
                 )
                 AsyncImage(
                     model = DxNetAssets.gradeIconUrl(score.grade),
@@ -1137,7 +1278,7 @@ private fun DxNetScorePanel(
                 }
             }
             DxScoreLine(score = score)
-            HorizontalDivider(color = Color.Black.copy(alpha = 0.16f))
+            HorizontalDivider(color = MaiDexTheme.colors.ink.copy(alpha = 0.16f))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1148,7 +1289,7 @@ private fun DxNetScorePanel(
                         "NOTES DESIGNER",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Black,
-                        color = Color(0xFF16804A),
+                        color = MaiDexTheme.colors.positive,
                     )
                     Text(
                         titleWithRomanization(
@@ -1157,7 +1298,7 @@ private fun DxNetScorePanel(
                         ).ifBlank { "—" },
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF26373F),
+                        color = MaiDexTheme.colors.inkSoft,
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
@@ -1166,14 +1307,14 @@ private fun DxNetScorePanel(
                             "Rt $it",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Black,
-                            color = Color(0xFF172126),
+                            color = MaiDexTheme.colors.ink,
                         )
                     }
                     chart.bpm?.let {
                         Text(
                             "BPM $it",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF4D5A61),
+                            color = MaiDexTheme.colors.inkMuted,
                         )
                     }
                 }
@@ -1321,7 +1462,7 @@ private fun DxScoreLine(
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Black,
-                color = Color(0xFF26373F),
+                color = MaiDexTheme.colors.inkSoft,
             )
             DxStarImage(score.dxStarCount)
         }
@@ -1330,7 +1471,7 @@ private fun DxScoreLine(
                 "${String.format(Locale.US, "%.2f", it)}% of maximum DX score",
                 modifier = Modifier.align(Alignment.End),
                 style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFF4D5A61),
+                color = MaiDexTheme.colors.inkMuted,
             )
         }
     }
@@ -1358,72 +1499,70 @@ private fun DxStarImage(stars: Int) {
 
 
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DanGuideDialog(
+private fun DanGuideScreen(
     chartLookup: Map<String, SongChart>,
     initialRegion: AccountRegion,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
     onChart: (SongChart) -> Unit,
 ) {
     val context = LocalContext.current
-    var region by remember(initialRegion) { mutableStateOf(initialRegion) }
-    var version by remember { mutableStateOf(DanCourseMetadata.version) }
-    var group by remember { mutableStateOf(DanCourseGroup.TRUE) }
+    var region by rememberSaveable(initialRegion) { mutableStateOf(initialRegion) }
+    var version by rememberSaveable { mutableStateOf(DanCourseMetadata.version) }
+    var group by rememberSaveable { mutableStateOf(DanCourseGroup.TRUE) }
+    var query by rememberSaveable { mutableStateOf("") }
     val versionCourses = DanCourseMetadata.coursesForVersion(version)
     val groups = DanCourseGroup.entries.filter { candidate -> versionCourses.any { it.group == candidate } }
     LaunchedEffect(version) {
         if (group !in groups) group = DanCourseGroup.TRUE
     }
-    val courses = versionCourses.filter { it.group == group }
+    // Search looks through every Dan type of the selected version only (owner decision).
+    val searching = query.isNotBlank()
+    val courses = if (searching) {
+        filterDanCourses(versionCourses, query, region, chartLookup)
+    } else {
+        versionCourses.filter { it.group == group }
+    }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.94f),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Dan courses",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
+    SecondaryScreen(
+        title = "Dan courses",
+        subtitle = "$version · ${region.label}",
+        onBack = onBack,
+        actions = {
+            IconButton(
+                onClick = {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(DanCourseMetadata.sourceUrl(region, version))),
                     )
-                    IconButton(
-                        onClick = {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(DanCourseMetadata.sourceUrl(region, version))),
-                            )
-                        },
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.OpenInNew,
-                            contentDescription = "Open Dan course source",
-                        )
-                    }
-                    TextButton(onClick = onDismiss) { Text("Close") }
-                }
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
+                },
+            ) {
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open Dan course source")
+            }
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item(key = "controls") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    GuideSearchField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = "Course or song in $version",
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         LabeledDropdown(
                             label = "Version",
                             value = version,
                             options = DanCourseMetadata.versions,
                             optionLabel = { it },
                             onSelect = { version = it },
+                            modifier = Modifier.weight(1f),
                         )
                         LabeledDropdown(
                             label = "Region",
@@ -1431,41 +1570,54 @@ private fun DanGuideDialog(
                             options = AccountRegion.entries,
                             optionLabel = AccountRegion::label,
                             onSelect = { region = it },
-                        )
-                        LabeledDropdown(
-                            label = "Dan Type",
-                            value = group,
-                            options = groups,
-                            optionLabel = { option ->
-                                when (option) {
-                                    DanCourseGroup.NORMAL -> "Dan 1–10"
-                                    DanCourseGroup.TRUE -> "Shin Dan"
-                                    DanCourseGroup.URA -> "Ura Kaiden"
-                                }
-                            },
-                            onSelect = { group = it },
+                            modifier = Modifier.weight(1f),
                         )
                     }
-                }
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(courses, key = { "$version:${it.id}" }) { course ->
-                        DanCourseCard(
-                            course = course,
-                            region = region,
-                            chartLookup = chartLookup,
-                            onChart = onChart,
+                    if (searching) {
+                        Text(
+                            "${courses.size} of ${versionCourses.size} $version courses match, all Dan types",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    } else {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            groups.forEach { option ->
+                                FilterChip(
+                                    selected = option == group,
+                                    onClick = { group = option },
+                                    label = { Text(danGroupLabel(option)) },
+                                )
+                            }
+                        }
                     }
                 }
             }
+            if (courses.isEmpty()) {
+                item(key = "empty") {
+                    EmptyState(
+                        icon = Icons.Default.SearchOff,
+                        title = "No matching courses",
+                        body = "No $version course name or track matches “$query”. Search covers the selected version only.",
+                    )
+                }
+            }
+            items(courses, key = { "$version:${it.id}" }) { course ->
+                DanCourseCard(
+                    course = course,
+                    region = region,
+                    chartLookup = chartLookup,
+                    onChart = onChart,
+                    showGroup = searching,
+                )
+            }
         }
     }
+}
+
+private fun danGroupLabel(group: DanCourseGroup): String = when (group) {
+    DanCourseGroup.NORMAL -> "Dan 1–10"
+    DanCourseGroup.TRUE -> "Shin Dan"
+    DanCourseGroup.URA -> "Ura Kaiden"
 }
 
 @Composable
@@ -1475,20 +1627,24 @@ private fun <T> LabeledDropdown(
     options: List<T>,
     optionLabel: (T) -> String,
     onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
         Box(Modifier.fillMaxWidth()) {
             OutlinedButton(
                 onClick = { expanded = true },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(6.dp),
+                contentPadding = PaddingValues(start = 12.dp, end = 4.dp),
             ) {
                 Text(
                     optionLabel(value),
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Start,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Icon(Icons.Default.ArrowDropDown, contentDescription = null)
             }
@@ -1516,6 +1672,7 @@ private fun DanCourseCard(
     region: AccountRegion,
     chartLookup: Map<String, SongChart>,
     onChart: (SongChart) -> Unit,
+    showGroup: Boolean,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1532,6 +1689,14 @@ private fun DanCourseCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
+                    if (showGroup) {
+                        Text(
+                            danGroupLabel(course.group).uppercase(Locale.ROOT),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     Text(course.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                     Text(
                         course.nameEnglish,
@@ -1575,6 +1740,22 @@ private fun DanCourseCard(
     }
 }
 
+/** "DX · MASTER 14+ (14.7)"; level and constant are left out when the catalog does not know them. */
+internal fun danTrackLabel(track: DanTrack, chart: SongChart?): String = buildString {
+    append(typeLabel(track.type))
+    append(" · ")
+    append(difficultyLabel(track.difficulty))
+    chart?.level?.let {
+        append(' ')
+        append(it)
+    }
+    chart?.constant?.let {
+        append(" (")
+        append(String.format(Locale.US, "%.1f", it))
+        append(')')
+    }
+}
+
 @Composable
 private fun DanTrackRow(
     number: Int,
@@ -1582,18 +1763,6 @@ private fun DanTrackRow(
     chart: SongChart?,
     onChart: (SongChart) -> Unit,
 ) {
-    val chartLabel = buildString {
-        append(typeLabel(track.type))
-        append(" · ")
-        append(difficultyLabel(track.difficulty))
-        append(' ')
-        append(chart?.level ?: "?")
-        chart?.constant?.let {
-            append(" (")
-            append(String.format(Locale.US, "%.1f", it))
-            append(')')
-        }
-    }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1606,14 +1775,7 @@ private fun DanTrackRow(
             horizontalArrangement = Arrangement.spacedBy(9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AsyncImage(
-                model = chart?.imageUrl,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(7.dp)),
-                contentScale = ContentScale.Crop,
-            )
+            SongJacket(imageUrl = chart?.imageUrl, size = 52.dp)
             Column(Modifier.weight(1f)) {
                 Text(
                     "TRACK $number",
@@ -1628,40 +1790,81 @@ private fun DanTrackRow(
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (chart == null) {
-                    Text(
-                        "Chart unavailable in this catalog",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                } else {
-                    Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height(3.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Surface(
                         color = difficultyColor(track.difficulty).copy(alpha = 0.15f),
                         shape = RoundedCornerShape(7.dp),
                     ) {
                         Text(
-                            chartLabel,
+                            danTrackLabel(track, chart),
                             modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
-                            color = difficultyColor(track.difficulty),
+                            color = difficultyTextColor(track.difficulty),
+                        )
+                    }
+                    if (chart == null) {
+                        Text(
+                            "Not in the offline catalog",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
+            }
+            if (chart != null) {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
 }
 
+/** Cover art, or a music-note tile when there is no image (a song missing from the catalog). */
 @Composable
-private fun UnlockGuideDialog(
+private fun SongJacket(imageUrl: String?, size: androidx.compose.ui.unit.Dp) {
+    if (imageUrl.isNullOrBlank()) {
+        Surface(
+            modifier = Modifier.size(size),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(7.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.MusicNote,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    } else {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = null,
+            modifier = Modifier
+                .size(size)
+                .clip(RoundedCornerShape(7.dp)),
+            contentScale = ContentScale.Crop,
+        )
+    }
+}
+
+@Composable
+private fun UnlockGuideScreen(
     section: UnlockGuideSection,
     initialEntryId: String?,
     charts: List<SongChart>,
     scores: Map<String, UserScore>,
     profile: PlayerProfile?,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
+    onChart: (SongChart) -> Unit,
 ) {
     val context = LocalContext.current
     val initialEntry = remember(initialEntryId, section) {
@@ -1671,6 +1874,13 @@ private fun UnlockGuideDialog(
     }
     val romanizedTitles = remember(charts) {
         charts.asSequence().associate { it.sourceSongId to it.titleRomanized }
+    }
+    val chartsBySong = remember(charts) {
+        buildMap<String, MutableList<SongChart>> {
+            charts.forEach { chart ->
+                setOf(chart.sourceSongId, chart.title).forEach { getOrPut(it) { mutableListOf() }.add(chart) }
+            }
+        }
     }
     val (bestScoresBySong, bestScoresBySongAndLevel) = remember(charts, scores) {
         val bySong = mutableMapOf<String, UserScore>()
@@ -1696,63 +1906,100 @@ private fun UnlockGuideDialog(
     } else {
         entries
     }
+    var query by rememberSaveable { mutableStateOf("") }
+    val visibleEntries = filterUnlockGuideEntries(orderedEntries, query, romanizedTitles)
     val currentClassVersion = ClassBattleMetadata.byVersion.keys.firstOrNull()
+    val isChiho = section == UnlockGuideSection.CHIHOS
+    val chartFor: (String, String?) -> SongChart? = { title, level ->
+        guideSongChart(title, chartsBySong[title].orEmpty(), scores, level)
+    }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
+    SecondaryScreen(
+        title = if (isChiho) "Chiho guides" else "Class Battle guides",
+        subtitle = if (isChiho) "${entries.size} areas" else "${entries.size} versions",
+        onBack = onBack,
+    ) { padding ->
+        LazyColumn(
             modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.94f),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(Modifier.padding(16.dp)) {
-                Row(
+            item(key = "search") {
+                GuideSearchField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = if (isChiho) "Area or unlock song" else "Version, Gift Song or boss song",
+                )
+            }
+            item(key = "intro") {
+                Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
+                    color = MaiDexTheme.colors.infoContainer,
+                    shape = RoundedCornerShape(12.dp),
                 ) {
-                    Text(
-                        if (section == UnlockGuideSection.CHIHOS) {
-                            "Chiho guides"
-                        } else {
-                            "Class Battle guides"
-                        },
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    TextButton(onClick = onDismiss) { Text("Close") }
-                }
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(orderedEntries, key = UnlockGuideEntry::id) { entry ->
-                        UnlockGuideEntryCard(
-                            entry = entry,
-                            isLinkedEntry = entry.id == initialEntryId,
-                            isCurrentClassVersion = entry.title == currentClassVersion,
-                            romanizedTitles = romanizedTitles,
-                            bestScoresBySong = bestScoresBySong,
-                            bestScoresBySongAndLevel = bestScoresBySongAndLevel,
-                            profile = profile,
-                            onOpenSource = {
-                                val sourceUrl = if (entry.section == UnlockGuideSection.CLASS_BATTLES) {
-                                    ClassBattleMetadata.sourceUrlForVersion(entry.title)
-                                } else {
-                                    entry.sourceUrl
-                                }
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sourceUrl)))
-                            },
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = MaiDexTheme.colors.info)
+                        Text(
+                            UnlockMetadata.sectionIntro(section),
+                            style = MaterialTheme.typography.bodySmall,
                         )
                     }
                 }
             }
+            if (visibleEntries.isEmpty()) {
+                item(key = "empty") {
+                    EmptyState(
+                        icon = Icons.Default.SearchOff,
+                        title = "No matches",
+                        body = if (isChiho) {
+                            "No area or unlock song matches “$query”."
+                        } else {
+                            "No version, Gift Song or boss song matches “$query”."
+                        },
+                    )
+                }
+            }
+            items(visibleEntries, key = UnlockGuideEntry::id) { entry ->
+                UnlockGuideEntryCard(
+                    entry = entry,
+                    isLinkedEntry = entry.id == initialEntryId,
+                    isCurrentClassVersion = entry.title == currentClassVersion,
+                    query = query,
+                    romanizedTitles = romanizedTitles,
+                    bestScoresBySong = bestScoresBySong,
+                    bestScoresBySongAndLevel = bestScoresBySongAndLevel,
+                    profile = profile,
+                    chartFor = chartFor,
+                    onChart = onChart,
+                    onOpenSource = {
+                        val sourceUrl = if (entry.section == UnlockGuideSection.CLASS_BATTLES) {
+                            ClassBattleMetadata.sourceUrlForVersion(entry.title)
+                        } else {
+                            entry.sourceUrl
+                        }
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sourceUrl)))
+                    },
+                )
+            }
         }
     }
+}
+
+/** Progress line of a Chiho card. Map completion comes from DX NET, so it needs an imported profile. */
+internal fun chihoStatusText(
+    playedSongs: Int,
+    totalSongs: Int,
+    mapComplete: Boolean,
+    signedIn: Boolean,
+): String = when {
+    mapComplete -> "Map complete on DX NET"
+    signedIn -> "$playedSongs/$totalSongs unlock songs played"
+    else -> "Sign in to DX NET to track this area"
 }
 
 @Composable
@@ -1760,15 +2007,27 @@ private fun UnlockGuideEntryCard(
     entry: UnlockGuideEntry,
     isLinkedEntry: Boolean,
     isCurrentClassVersion: Boolean,
+    query: String,
     romanizedTitles: Map<String, String>,
     bestScoresBySong: Map<String, UserScore>,
     bestScoresBySongAndLevel: Map<String, UserScore>,
     profile: PlayerProfile?,
+    chartFor: (String, String?) -> SongChart?,
+    onChart: (SongChart) -> Unit,
     onOpenSource: () -> Unit,
 ) {
     val isChiho = entry.section == UnlockGuideSection.CHIHOS
     val milestones = ClassBattleMetadata.byVersion[entry.title].orEmpty()
-    var showMilestones by remember(entry.id) { mutableStateOf(isLinkedEntry) }
+    var showMilestones by rememberSaveable(entry.id) { mutableStateOf(isLinkedEntry) }
+    // A search that matches a boss song opens the milestone list so the match is visible.
+    val normalizedQuery = normalizeSearch(query)
+    val milestoneMatch = normalizedQuery.isNotEmpty() && milestones.any { milestone ->
+        normalizeSearch(milestone.songTitle).contains(normalizedQuery) ||
+            normalizeSearch(romanizedTitles[milestone.songTitle].orEmpty()).contains(normalizedQuery)
+    }
+    LaunchedEffect(milestoneMatch) {
+        if (milestoneMatch) showMilestones = true
+    }
     val completedChiho = isChiho && chihoIsCompleted(
         title = entry.title,
         romanized = entry.titleRomanized,
@@ -1787,6 +2046,7 @@ private fun UnlockGuideEntryCard(
             classBattleScoreKey(milestone.songTitle, milestone.level)
         ] != null || bestScoresBySong[unlockProgressSongKey(milestone.songTitle)] != null
     }
+    val allClassesCleared = isCurrentClassVersion && clearedClasses == milestones.size && milestones.isNotEmpty()
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1807,19 +2067,27 @@ private fun UnlockGuideEntryCard(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            Text(
-                titleWithRomanization(entry.title, entry.titleRomanized),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                entry.subtitle,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(5.dp))
-            Text(entry.details, style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        titleWithRomanization(entry.title, entry.titleRomanized),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        entry.subtitle,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onOpenSource) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.OpenInNew,
+                        contentDescription = if (isChiho) "Open source" else "Open boss source",
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.68f),
@@ -1834,18 +2102,14 @@ private fun UnlockGuideEntryCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
-                            imageVector = when {
-                                completedChiho -> Icons.Default.CheckCircle
-                                isCurrentClassVersion && clearedClasses == milestones.size && milestones.isNotEmpty() ->
-                                    Icons.Default.CheckCircle
-                                else -> Icons.Default.RadioButtonUnchecked
+                            imageVector = if (completedChiho || allClassesCleared) {
+                                Icons.Default.CheckCircle
+                            } else {
+                                Icons.Default.RadioButtonUnchecked
                             },
                             contentDescription = null,
                             modifier = Modifier.size(18.dp),
-                            tint = if (
-                                completedChiho ||
-                                isCurrentClassVersion && clearedClasses == milestones.size && milestones.isNotEmpty()
-                            ) {
+                            tint = if (completedChiho || allClassesCleared) {
                                 MaterialTheme.colorScheme.primary
                             } else {
                                 MaterialTheme.colorScheme.onSecondaryContainer
@@ -1853,8 +2117,12 @@ private fun UnlockGuideEntryCard(
                         )
                         Text(
                             text = when {
-                                isChiho && completedChiho -> "DX NET map complete"
-                                isChiho -> "$playedUnlockSongs/${entry.songs.size} unlock songs played · map not confirmed complete"
+                                isChiho -> chihoStatusText(
+                                    playedSongs = playedUnlockSongs,
+                                    totalSongs = entry.songs.size,
+                                    mapComplete = completedChiho,
+                                    signedIn = profile != null,
+                                )
                                 isCurrentClassVersion && profile?.friendClass.equals("LEGEND", ignoreCase = true) ->
                                     "LEGEND · all ${milestones.size} classes cleared"
                                 isCurrentClassVersion && profile?.friendClass.isNullOrBlank() ->
@@ -1883,39 +2151,19 @@ private fun UnlockGuideEntryCard(
                     )
                 }
             }
-            Spacer(Modifier.height(7.dp))
+            Spacer(Modifier.height(4.dp))
             entry.songs.forEach { song ->
                 val played = bestScoresBySong[unlockProgressSongKey(song.title)] != null
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Icon(
-                        imageVector = if (played) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .padding(top = 2.dp)
-                            .size(17.dp),
-                        tint = if (played) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            titleWithRomanization(song.title, romanizedTitles[song.title].orEmpty()),
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            listOfNotNull(
-                                song.requirement.takeIf(String::isNotBlank),
-                                "Played".takeIf { played },
-                            ).joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                GuideSongRow(
+                    title = titleWithRomanization(song.title, romanizedTitles[song.title].orEmpty()),
+                    detail = listOfNotNull(
+                        song.requirement.takeIf(String::isNotBlank),
+                        "Played".takeIf { played },
+                    ).joinToString(" · "),
+                    played = played,
+                    chart = chartFor(song.title, null),
+                    onChart = onChart,
+                )
             }
             if (!isChiho && milestones.isNotEmpty()) {
                 TextButton(
@@ -1942,16 +2190,60 @@ private fun UnlockGuideEntryCard(
                                 current = isCurrentClassVersion &&
                                     index == clearedClasses &&
                                     !profile?.friendClass.equals("LEGEND", ignoreCase = true),
+                                chart = chartFor(milestone.songTitle, milestone.level),
+                                onChart = onChart,
                             )
                         }
                     }
                 }
             }
-            TextButton(onClick = onOpenSource, modifier = Modifier.align(Alignment.End)) {
-                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text(if (isChiho) "Source" else "Boss source")
+        }
+    }
+}
+
+/** An unlock song: jacket, title and requirement; opens the song's chart when the catalog has it. */
+@Composable
+private fun GuideSongRow(
+    title: String,
+    detail: String,
+    played: Boolean,
+    chart: SongChart?,
+    onChart: (SongChart) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = chart != null) { chart?.let(onChart) }
+            .padding(vertical = 5.dp, horizontal = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SongJacket(imageUrl = chart?.imageUrl, size = 44.dp)
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            if (detail.isNotBlank()) {
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
+        }
+        if (played) {
+            Icon(
+                Icons.Default.CheckCircle,
+                contentDescription = "Played",
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (chart != null) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -1962,9 +2254,14 @@ private fun ClassBattleMilestoneRow(
     score: UserScore?,
     cleared: Boolean,
     current: Boolean,
+    chart: SongChart?,
+    onChart: (SongChart) -> Unit,
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(9.dp))
+            .clickable(enabled = chart != null) { chart?.let(onChart) },
         color = when {
             cleared -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
             current -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.72f)
@@ -1974,23 +2271,24 @@ private fun ClassBattleMilestoneRow(
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = if (cleared) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                contentDescription = null,
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .size(17.dp),
-                tint = if (cleared) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            SongJacket(imageUrl = chart?.imageUrl, size = 40.dp)
             Column(Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    if (cleared) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = "Cleared",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     Text(
                         milestone.className,
                         style = MaterialTheme.typography.labelLarge,
@@ -2029,14 +2327,14 @@ private fun ClassBattleMilestoneRow(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FilterDialog(
+private fun FilterScreen(
     filters: ChartFilters,
     sort: ChartSort,
     sortOrder: SortOrder,
     options: FilterOptions,
     presets: List<FilterPreset>,
     hasScores: Boolean,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
     onApply: (ChartFilters, ChartSort, SortOrder) -> Unit,
     onSavePreset: (String, ChartFilters, ChartSort, SortOrder) -> Unit,
     onDeletePreset: (String) -> Unit,
@@ -2068,273 +2366,267 @@ private fun FilterDialog(
         draftSortOrder = preset.sortOrder
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.94f)
-                .imePadding(),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(Modifier.padding(20.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Filters", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = {
-                        draft = ChartFilters(search = filters.search)
-                        minLevel = ""
-                        maxLevel = ""
-                        minBpm = ""
-                        maxBpm = ""
-                        draftSort = ChartSort.LEVEL
-                        draftSortOrder = SortOrder.DESCENDING
-                    }) { Text("Reset") }
-                }
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    item(key = "presets") {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                "Presets",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            FilterPresetMenu(
-                                presets = presets,
-                                onSelect = applyPreset,
-                                onDelete = onDeletePreset,
-                            )
-                            if (showSavePreset) {
-                                OutlinedTextField(
-                                    value = presetName,
-                                    onValueChange = { presetName = it },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    label = { Text("Preset name") },
-                                    singleLine = true,
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End,
-                                ) {
-                                    TextButton(onClick = {
-                                        showSavePreset = false
-                                        presetName = ""
-                                    }) { Text("Cancel") }
-                                    Button(
-                                        enabled = presetName.isNotBlank(),
-                                        onClick = {
-                                            onSavePreset(
-                                                presetName,
-                                                normalizedDraft(),
-                                                draftSort,
-                                                draftSortOrder,
-                                            )
-                                            showSavePreset = false
-                                            presetName = ""
-                                        },
-                                    ) { Text("Save") }
-                                }
-                            } else {
-                                TextButton(onClick = { showSavePreset = true }) {
-                                    Text("Save current as preset")
-                                }
-                            }
-                        }
-                    }
-                    item(key = "preset-divider") { HorizontalDivider() }
-                    item(key = "sort") {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            LabeledDropdown(
-                                label = "Sort",
-                                value = draftSort,
-                                options = ChartSort.entries,
-                                optionLabel = ChartSort::label,
-                                onSelect = { draftSort = it },
-                            )
-                            LabeledDropdown(
-                                label = "Sort order",
-                                value = draftSortOrder,
-                                options = SortOrder.entries,
-                                optionLabel = SortOrder::label,
-                                onSelect = { draftSortOrder = it },
-                            )
-                        }
-                    }
-                    item(key = "artist") {
-                        OutlinedTextField(
-                            value = draft.artist,
-                            onValueChange = { draft = draft.copy(artist = it) },
-                            label = { Text("Artist") },
-                            placeholder = { Text("Original or romanised name") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                        )
-                    }
-                    item(key = "designer") {
-                        OutlinedTextField(
-                            value = draft.noteDesigner,
-                            onValueChange = { draft = draft.copy(noteDesigner = it) },
-                            label = { Text("Notes designer") },
-                            placeholder = { Text("Original or romanised name") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                        )
-                    }
-                    item(key = "level-range") {
-                        RangeFields(
-                            title = "Level / constant range",
-                            minimum = minLevel,
-                            maximum = maxLevel,
-                            keyboardType = KeyboardType.Decimal,
-                            onMinimum = { minLevel = it },
-                            onMaximum = { maxLevel = it },
-                        )
-                    }
-                    item(key = "bpm-range") {
-                        RangeFields(
-                            title = "BPM range",
-                            minimum = minBpm,
-                            maximum = maxBpm,
-                            keyboardType = KeyboardType.Number,
-                            onMinimum = { minBpm = it.filter(Char::isDigit) },
-                            onMaximum = { maxBpm = it.filter(Char::isDigit) },
-                        )
-                    }
-                    item(key = "constant-availability") {
-                        ConstantAvailabilityMenu(
-                            selected = draft.constantAvailability,
-                            onSelect = { draft = draft.copy(constantAvailability = it) },
-                        )
-                    }
-                    if (hasScores) {
-                        item(key = "score-heading") {
-                            Text(
-                                "My scores",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                        item(key = "played-only") {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text("Played charts only", modifier = Modifier.weight(1f))
-                                Switch(
-                                    checked = draft.scoredOnly,
-                                    onCheckedChange = { draft = draft.copy(scoredOnly = it) },
-                                )
-                            }
-                        }
-                        item(key = "rank") {
-                            MultiSelectSection(
-                                "Rank",
-                                Grade.entries,
-                                draft.grades,
-                                label = Grade::label,
-                            ) { draft = draft.copy(grades = it) }
-                        }
-                        item(key = "achievement-medal") {
-                            MultiSelectSection(
-                                "Achievement medal",
-                                ComboMedal.entries.filterNot { it == ComboMedal.NONE },
-                                draft.comboMedals,
-                                label = ComboMedal::label,
-                            ) { draft = draft.copy(comboMedals = it) }
-                        }
-                        item(key = "sync-medal") {
-                            MultiSelectSection(
-                                "Sync medal",
-                                SyncMedal.entries.filterNot { it == SyncMedal.NONE },
-                                draft.syncMedals,
-                                label = SyncMedal::label,
-                            ) { draft = draft.copy(syncMedals = it) }
-                        }
-                        item(key = "score-divider") { HorizontalDivider() }
-                    } else {
-                        item(key = "score-sign-in") {
-                            Text(
-                                "Sign in to DX NET to filter by rank, achievement medal, and sync medal.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    item(key = "category") {
-                        MultiSelectSection("Category", options.categories, draft.categories) {
-                            draft = draft.copy(categories = it)
-                        }
-                    }
-                    item(key = "difficulty") {
-                        MultiSelectSection(
-                            "Difficulty",
-                            options.difficulties,
-                            draft.difficulties,
-                            label = { difficultyLabel(it) },
-                        ) { draft = draft.copy(difficulties = it) }
-                    }
-                    item(key = "type") {
-                        MultiSelectSection(
-                            "Type",
-                            options.types,
-                            draft.types,
-                            label = { typeLabel(it) },
-                        ) { draft = draft.copy(types = it) }
-                    }
-                    item(key = "show-utage") {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Show UTAGE charts")
-                                Text(
-                                    "Hide banquet charts from catalog results.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = draft.showUtage,
-                                onCheckedChange = { draft = draft.copy(showUtage = it) },
-                            )
-                        }
-                    }
-                    item(key = "region") {
-                        MultiSelectSection(
-                            "Region",
-                            options.regions,
-                            draft.regions,
-                            label = { regionLabel(it) },
-                        ) { draft = draft.copy(regions = it) }
-                    }
-                    item(key = "version") {
-                        MultiSelectSection("Version", options.versions, draft.versions) {
-                            draft = draft.copy(versions = it)
-                        }
-                    }
-                    item(key = "bottom-space") { Spacer(Modifier.height(4.dp)) }
-                }
+    SecondaryScreen(
+        title = "Filters",
+        onBack = onBack,
+        actions = {
+            TextButton(onClick = {
+                draft = ChartFilters(search = filters.search)
+                minLevel = ""
+                maxLevel = ""
+                minBpm = ""
+                maxBpm = ""
+                draftSort = ChartSort.LEVEL
+                draftSortOrder = SortOrder.DESCENDING
+            }) { Text("Reset") }
+        },
+        bottomBar = {
+            Surface(tonalElevation = 3.dp) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 12.dp),
+                        .navigationBarsPadding()
+                        .imePadding()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 ) {
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    TextButton(onClick = onBack) { Text("Cancel") }
                     Button(onClick = {
                         onApply(normalizedDraft(), draftSort, draftSortOrder)
                     }) { Text("Show results") }
                 }
             }
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item(key = "presets") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Presets",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    FilterPresetMenu(
+                        presets = presets,
+                        onSelect = applyPreset,
+                        onDelete = onDeletePreset,
+                    )
+                    if (showSavePreset) {
+                        OutlinedTextField(
+                            value = presetName,
+                            onValueChange = { presetName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Preset name") },
+                            singleLine = true,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            TextButton(onClick = {
+                                showSavePreset = false
+                                presetName = ""
+                            }) { Text("Cancel") }
+                            Button(
+                                enabled = presetName.isNotBlank(),
+                                onClick = {
+                                    onSavePreset(
+                                        presetName,
+                                        normalizedDraft(),
+                                        draftSort,
+                                        draftSortOrder,
+                                    )
+                                    showSavePreset = false
+                                    presetName = ""
+                                },
+                            ) { Text("Save") }
+                        }
+                    } else {
+                        TextButton(onClick = { showSavePreset = true }) {
+                            Text("Save current as preset")
+                        }
+                    }
+                }
+            }
+            item(key = "preset-divider") { HorizontalDivider() }
+            item(key = "sort") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LabeledDropdown(
+                        label = "Sort",
+                        value = draftSort,
+                        options = ChartSort.entries,
+                        optionLabel = ChartSort::label,
+                        onSelect = { draftSort = it },
+                    )
+                    LabeledDropdown(
+                        label = "Sort order",
+                        value = draftSortOrder,
+                        options = SortOrder.entries,
+                        optionLabel = SortOrder::label,
+                        onSelect = { draftSortOrder = it },
+                    )
+                }
+            }
+            item(key = "artist") {
+                OutlinedTextField(
+                    value = draft.artist,
+                    onValueChange = { draft = draft.copy(artist = it) },
+                    label = { Text("Artist") },
+                    placeholder = { Text("Original or romanised name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+            }
+            item(key = "designer") {
+                OutlinedTextField(
+                    value = draft.noteDesigner,
+                    onValueChange = { draft = draft.copy(noteDesigner = it) },
+                    label = { Text("Notes designer") },
+                    placeholder = { Text("Original or romanised name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+            }
+            item(key = "level-range") {
+                RangeFields(
+                    title = "Level / constant range",
+                    minimum = minLevel,
+                    maximum = maxLevel,
+                    keyboardType = KeyboardType.Decimal,
+                    onMinimum = { minLevel = it },
+                    onMaximum = { maxLevel = it },
+                )
+            }
+            item(key = "bpm-range") {
+                RangeFields(
+                    title = "BPM range",
+                    minimum = minBpm,
+                    maximum = maxBpm,
+                    keyboardType = KeyboardType.Number,
+                    onMinimum = { minBpm = it.filter(Char::isDigit) },
+                    onMaximum = { maxBpm = it.filter(Char::isDigit) },
+                )
+            }
+            item(key = "constant-availability") {
+                ConstantAvailabilityMenu(
+                    selected = draft.constantAvailability,
+                    onSelect = { draft = draft.copy(constantAvailability = it) },
+                )
+            }
+            if (hasScores) {
+                item(key = "score-heading") {
+                    Text(
+                        "My scores",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                item(key = "played-only") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Played charts only", modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = draft.scoredOnly,
+                            onCheckedChange = { draft = draft.copy(scoredOnly = it) },
+                        )
+                    }
+                }
+                item(key = "rank") {
+                    MultiSelectSection(
+                        "Rank",
+                        Grade.entries,
+                        draft.grades,
+                        label = Grade::label,
+                    ) { draft = draft.copy(grades = it) }
+                }
+                item(key = "achievement-medal") {
+                    MultiSelectSection(
+                        "Achievement medal",
+                        ComboMedal.entries.filterNot { it == ComboMedal.NONE },
+                        draft.comboMedals,
+                        label = ComboMedal::label,
+                    ) { draft = draft.copy(comboMedals = it) }
+                }
+                item(key = "sync-medal") {
+                    MultiSelectSection(
+                        "Sync medal",
+                        SyncMedal.entries.filterNot { it == SyncMedal.NONE },
+                        draft.syncMedals,
+                        label = SyncMedal::label,
+                    ) { draft = draft.copy(syncMedals = it) }
+                }
+                item(key = "score-divider") { HorizontalDivider() }
+            } else {
+                item(key = "score-sign-in") {
+                    Text(
+                        "Sign in to DX NET to filter by rank, achievement medal, and sync medal.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            item(key = "category") {
+                MultiSelectSection("Category", options.categories, draft.categories) {
+                    draft = draft.copy(categories = it)
+                }
+            }
+            item(key = "difficulty") {
+                MultiSelectSection(
+                    "Difficulty",
+                    options.difficulties,
+                    draft.difficulties,
+                    label = { difficultyLabel(it) },
+                ) { draft = draft.copy(difficulties = it) }
+            }
+            item(key = "type") {
+                MultiSelectSection(
+                    "Type",
+                    options.types,
+                    draft.types,
+                    label = { typeLabel(it) },
+                ) { draft = draft.copy(types = it) }
+            }
+            item(key = "show-utage") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Show UTAGE charts")
+                        Text(
+                            "Hide banquet charts from catalog results.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = draft.showUtage,
+                        onCheckedChange = { draft = draft.copy(showUtage = it) },
+                    )
+                }
+            }
+            item(key = "region") {
+                MultiSelectSection(
+                    "Region",
+                    options.regions,
+                    draft.regions,
+                    label = { regionLabel(it) },
+                ) { draft = draft.copy(regions = it) }
+            }
+            item(key = "version") {
+                MultiSelectSection("Version", options.versions, draft.versions) {
+                    draft = draft.copy(versions = it)
+                }
+            }
+            item(key = "bottom-space") { Spacer(Modifier.height(4.dp)) }
         }
     }
 }
@@ -2455,7 +2747,7 @@ private fun <T> MultiSelectSection(
 }
 
 @Composable
-private fun AccountDialog(
+private fun AccountScreen(
     profile: PlayerProfile?,
     importStatus: ImportStatus,
     playCountSnapshots: List<PlayCountSnapshot>,
@@ -2465,12 +2757,13 @@ private fun AccountDialog(
     onSaveAutoLoginCredentials: (String, String) -> Unit,
     onAutoLoginEnabledChange: (Boolean) -> Unit,
     onForgetAutoLoginCredentials: () -> Unit,
-    onDismissStatus: () -> Unit,
-    onDismiss: () -> Unit,
+    onOpenProfileCard: () -> Unit,
+    onOpenPlayCountHistory: () -> Unit,
+    onBack: () -> Unit,
 ) {
-    var region by remember(profile) { mutableStateOf(profile?.region ?: AccountRegion.INTERNATIONAL) }
-    var showProfileCloseUp by remember(profile) { mutableStateOf(false) }
-    var showPlayCountHistory by remember(profile) { mutableStateOf(false) }
+    var region by rememberSaveable(profile?.region) {
+        mutableStateOf(profile?.region ?: AccountRegion.INTERNATIONAL)
+    }
     val context = LocalContext.current
     val isImporting = importStatus is ImportStatus.Running
     val loginLauncher = rememberLauncherForActivityResult(
@@ -2479,409 +2772,305 @@ private fun AccountDialog(
         if (result.resultCode == Activity.RESULT_OK) onImportData(region)
     }
 
-    Dialog(
-        onDismissRequest = {
-            onDismissStatus()
-            onDismiss()
-        },
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(0.94f),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
+    SecondaryScreen(title = "maimai DX NET", subtitle = profile?.name, onBack = onBack) { padding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(padding)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Column(
-                Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
+            Text(
+                "Region",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "maimai DX NET",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 1,
+                AccountRegion.entries.forEach { option ->
+                    FilterChip(
+                        selected = region == option,
+                        enabled = !isImporting,
+                        onClick = { region = option },
+                        label = { Text(option.label) },
                     )
-                    TextButton(onClick = {
-                        onDismissStatus()
-                        onDismiss()
-                    }) { Text("Close") }
                 }
+            }
 
-                Row(
+            if (profile != null) {
+                DxNetProfileCard(
+                    profile = profile,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    AccountRegion.entries.forEach { option ->
-                        FilterChip(
-                            selected = region == option,
-                            enabled = !isImporting,
-                            onClick = { region = option },
-                            label = { Text(option.label) },
-                        )
-                    }
-                }
-
-                if (profile != null) {
-                    DxNetProfileCard(
-                        profile = profile,
-                        modifier = Modifier
-                            .padding(top = 6.dp, bottom = 8.dp)
-                            .clickable { showProfileCloseUp = true },
-                    )
-                    DxNetPlayCounts(profile)
-                    if (playCountSnapshots.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "${playCountSnapshots.size} daily play-count snapshot" +
-                                    if (playCountSnapshots.size == 1) "" else "s",
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            TextButton(onClick = { showPlayCountHistory = true }) {
-                                Text("View history")
-                            }
-                        }
-                    }
-                } else {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 6.dp, bottom = 8.dp),
-                        color = Color(0xFFE5F6FD),
-                        border = BorderStroke(1.dp, Color(0xFF73C8E8)),
-                        shape = RoundedCornerShape(14.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                Icons.Default.AccountCircle,
-                                contentDescription = null,
-                                tint = Color(0xFF087BA8),
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Column {
-                                Text("No DX NET profile imported", fontWeight = FontWeight.Bold)
-                                Text(
-                                    "Sign in to import your profile, scores, play history, and circle data.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                }
-
-                when (importStatus) {
-                    is ImportStatus.Running -> Row(
-                        modifier = Modifier.padding(vertical = 8.dp),
+                        .padding(top = 6.dp, bottom = 8.dp)
+                        .clickable(onClick = onOpenProfileCard),
+                )
+                DxNetPlayCounts(profile)
+                if (playCountSnapshots.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 3.dp)
-                        Spacer(Modifier.width(9.dp))
-                        Text(importStatus.message)
-                    }
-                    is ImportStatus.Success -> Column(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
                         Text(
-                            "Imported ${importStatus.imported} scores and " +
-                                "${importStatus.recentDetails} recent play details.",
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        if (importStatus.unmatched > 0) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.errorContainer,
-                                shape = RoundedCornerShape(10.dp),
-                            ) {
-                                Text(
-                                    "${importStatus.unmatched} DX NET score entries could not be matched " +
-                                        "to this catalog, so they are not shown. This usually means a chart " +
-                                        "was added or renamed before the offline metadata was updated.",
-                                    modifier = Modifier.padding(10.dp),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                )
-                            }
-                        }
-                    }
-                    is ImportStatus.Failure -> Text(
-                        importStatus.message,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    ImportStatus.Idle -> Unit
-                }
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                        shape = RoundedCornerShape(14.dp),
-                    ) {
-                        Text(
-                            "Sign-in opens the official DX NET site full screen. MaiDex automatically imports " +
-                                "your profile, scores, play history, and circle data after sign-in succeeds.",
-                            modifier = Modifier.padding(14.dp),
-                            style = MaterialTheme.typography.bodyMedium,
+                            "${playCountSnapshots.size} daily play-count snapshot" +
+                                if (playCountSnapshots.size == 1) "" else "s",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        TextButton(onClick = onOpenPlayCountHistory) {
+                            Text("View history")
+                        }
                     }
                 }
-
-                Row(
+            } else {
+                Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        .padding(top = 6.dp, bottom = 8.dp),
+                    color = MaiDexTheme.colors.infoContainer,
+                    border = BorderStroke(1.dp, MaiDexTheme.colors.infoBorder),
+                    shape = RoundedCornerShape(14.dp),
                 ) {
-                    OutlinedButton(
-                        onClick = { loginLauncher.launch(DxNetLoginActivity.intent(context, region)) },
-                        enabled = !isImporting,
-                        modifier = Modifier.weight(1f),
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Sign in", maxLines = 1)
-                    }
-                    Button(
-                        onClick = { onImportData(region) },
-                        enabled = !isImporting,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Import data", maxLines = 1)
+                        Icon(
+                            Icons.Default.AccountCircle,
+                            contentDescription = null,
+                            tint = MaiDexTheme.colors.info,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text("No DX NET profile imported", fontWeight = FontWeight.Bold)
+                            Text(
+                                "Sign in to import your profile, scores, play history, and circle data.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
-                AutoSignInCard(
-                    state = autoLogin,
-                    busy = isImporting,
-                    onSaveCredentials = onSaveAutoLoginCredentials,
-                    onEnabledChange = onAutoLoginEnabledChange,
-                    onForget = onForgetAutoLoginCredentials,
-                )
-                if (profile != null || autoLogin.username != null) {
-                    TextButton(
-                        onClick = onClear,
-                        enabled = !isImporting,
-                        modifier = Modifier.align(Alignment.CenterHorizontally),
-                    ) {
-                        Text(
-                            if (autoLogin.username != null) {
-                                "Remove imported account data and saved SEGA ID login"
-                            } else {
-                                "Remove imported account data"
-                            },
-                        )
+            }
+
+            when (importStatus) {
+                is ImportStatus.Running -> Row(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 3.dp)
+                    Spacer(Modifier.width(9.dp))
+                    Text(importStatus.message)
+                }
+                is ImportStatus.Success -> Column(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        "Imported ${importStatus.imported} scores and " +
+                            "${importStatus.recentDetails} recent play details.",
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    if (importStatus.unmatched > 0) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(
+                                "${importStatus.unmatched} DX NET score entries could not be matched " +
+                                    "to this catalog, so they are not shown. This usually means a chart " +
+                                    "was added or renamed before the offline metadata was updated.",
+                                modifier = Modifier.padding(10.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                        }
                     }
+                }
+                is ImportStatus.Failure -> Text(
+                    importStatus.message,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.error,
+                )
+                ImportStatus.Idle -> Unit
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Text(
+                        "Sign-in opens the official DX NET site full screen. MaiDex automatically imports " +
+                            "your profile, scores, play history, and circle data after sign-in succeeds.",
+                        modifier = Modifier.padding(14.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = { loginLauncher.launch(DxNetLoginActivity.intent(context, region)) },
+                    enabled = !isImporting,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Sign in", maxLines = 1)
+                }
+                Button(
+                    onClick = { onImportData(region) },
+                    enabled = !isImporting,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Import data", maxLines = 1)
+                }
+            }
+            AutoSignInCard(
+                state = autoLogin,
+                busy = isImporting,
+                onSaveCredentials = onSaveAutoLoginCredentials,
+                onEnabledChange = onAutoLoginEnabledChange,
+                onForget = onForgetAutoLoginCredentials,
+            )
+            if (profile != null || autoLogin.username != null) {
+                TextButton(
+                    onClick = onClear,
+                    enabled = !isImporting,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
+                    Text(
+                        if (autoLogin.username != null) {
+                            "Remove imported account data and saved SEGA ID login"
+                        } else {
+                            "Remove imported account data"
+                        },
+                    )
                 }
             }
         }
     }
-    if (profile != null && showProfileCloseUp) {
-        ProfileCardCloseUpDialog(
-            profile = profile,
-            onDismiss = { showProfileCloseUp = false },
-        )
-    }
-    if (showPlayCountHistory) {
-        PlayCountHistoryDialog(
-            snapshots = playCountSnapshots,
-            onDismiss = { showPlayCountHistory = false },
-        )
-    }
 }
 
-private val DxCircleSky = Color(0xFF55BCE9)
-private val DxCircleBlue = Color(0xFF197CC5)
-private val DxCircleBlueDark = Color(0xFF075A9E)
-private val DxCirclePink = Color(0xFFF34BA7)
-private val DxCirclePinkLight = Color(0xFFFFD6EB)
-private val DxCircleInk = Color(0xFF263238)
-
 @Composable
-private fun CircleDialog(
+private fun CircleScreen(
     history: List<CircleData>,
     snapshots: List<CircleDailySnapshot>,
     trackingSettings: TrackingSettings,
     importStatus: ImportStatus,
     onSync: () -> Unit,
-    onDismiss: () -> Unit,
+    onOpenAccount: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val current = history.firstOrNull()
-    val otherMembers = remember(snapshots) {
-        snapshots.asSequence()
-            .flatMap { it.circle.members.asSequence() }
-            .filterNot { it.isCurrentUser }
-            .distinctBy { it.key }
-            .sortedByDescending { member ->
-                snapshots.lastOrNull()?.circle?.members
-                    ?.firstOrNull { it.key == member.key }
-                    ?.points ?: member.points
-            }
-            .toList()
-    }
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(
+    val memberTrends = remember(snapshots) { circleMemberTrends(snapshots) }
+    SecondaryScreen(
+        title = current?.name ?: "Circle",
+        subtitle = current?.let { circle ->
+            listOfNotNull(circle.month, circle.circleClass.takeIf(String::isNotBlank)?.let { "Class $it" })
+                .joinToString(" · ")
+        } ?: "No circle data yet",
+        onBack = onBack,
+    ) { padding ->
+        LazyColumn(
             modifier = Modifier
-                .fillMaxWidth(0.96f)
-                .fillMaxHeight(0.94f),
-            shape = RoundedCornerShape(24.dp),
-            color = DxCircleSky,
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(DxCircleBlueDark)
-                        .padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            current?.name ?: "Circle",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Black,
-                            color = Color.White,
-                        )
-                        Text(
-                            if (current == null) {
-                                "Sign in to import circle data"
-                            } else {
-                                current.month
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.82f),
-                        )
+            item(key = "tracking") {
+                CircleTrackingCard(
+                    settings = trackingSettings,
+                    importStatus = importStatus,
+                    onSync = onSync,
+                )
+            }
+            if (current == null) {
+                item(key = "empty") {
+                    EmptyState(
+                        icon = Icons.Default.Groups,
+                        title = "No circle data yet",
+                        body = "Sign in to DX NET or use Sync now. Monthly history starts with the first " +
+                            "successful circle sync.",
+                    ) {
+                        OutlinedButton(onClick = onOpenAccount) { Text("Open DX NET account") }
                     }
-                    TextButton(onClick = onDismiss) { Text("Close", color = Color.White) }
                 }
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = 10.dp,
-                        end = 10.dp,
-                        bottom = 18.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    item(key = "tracking") {
-                        CircleTrackingCard(
-                            settings = trackingSettings,
-                            importStatus = importStatus,
-                            onSync = onSync,
+            } else {
+                item(key = "summary") { CircleSummaryCard(current) }
+                item(key = "history-heading") {
+                    SectionHeading(
+                        "Daily point tracking",
+                        if (snapshots.isEmpty()) {
+                            "Trends appear after the first successful hourly sync"
+                        } else {
+                            "${snapshots.size} daily snapshot" + if (snapshots.size == 1) "" else "s"
+                        },
+                    )
+                }
+                if (snapshots.isNotEmpty()) {
+                    item(key = "circle-trend") {
+                        PointTrendCard(
+                            title = "Circle total",
+                            points = snapshots.map { it.day to it.circle.totalPoints },
                         )
                     }
-                    if (current == null) {
-                        item(key = "empty") {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = Color.White),
-                                border = BorderStroke(2.dp, DxCircleBlueDark),
-                                shape = RoundedCornerShape(8.dp),
-                            ) {
-                                Text(
-                                    "No circle information has been captured yet. Sign in to DX NET or use " +
-                                        "Sync now. Monthly history starts with the first successful circle sync.",
-                                    modifier = Modifier.padding(14.dp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    } else {
-                        val officialPages = current.pages.filter { it.html.isNotBlank() }
-                        if (officialPages.isEmpty()) {
-                            item(key = "snapshot-required") {
-                                Text(
-                                    "Sync now to capture the official Circle layouts.",
-                                    modifier = Modifier.padding(12.dp),
-                                )
-                            }
-                        }
-                        items(
-                            officialPages,
-                            key = { page -> "page-${page.type}-${page.title}" },
-                        ) { page ->
-                            OfficialCirclePage(html = page.html, modifier = Modifier.fillMaxWidth())
-                        }
-                        if (snapshots.isNotEmpty()) {
-                            item(key = "history-heading") {
-                                CircleSectionHeading(
-                                    "Daily point tracking",
-                                    "${snapshots.size} daily snapshot" +
-                                        if (snapshots.size == 1) "" else "s",
-                                )
-                            }
-                            item(key = "circle-trend") {
-                                PointTrendCard(
-                                    title = "Circle total",
-                                    points = snapshots.map { it.day to it.circle.totalPoints },
-                                )
-                            }
-                            val currentUserPoints = snapshots.mapNotNull { snapshot ->
-                                snapshot.circle.members
-                                    .firstOrNull { it.isCurrentUser }
-                                    ?.let { snapshot.day to it.points }
-                            }
-                            if (currentUserPoints.isNotEmpty()) {
-                                item(key = "current-user-trend") {
-                                    PointTrendCard(
-                                        title = snapshots.last().circle.members
-                                            .firstOrNull { it.isCurrentUser }
-                                            ?.name
-                                            ?.let { "$it (you)" }
-                                            ?: "Your contribution",
-                                        points = currentUserPoints,
-                                    )
-                                }
-                            }
-                            items(otherMembers, key = { member -> "trend-${member.key}" }) { member ->
-                                val memberPoints = snapshots.mapNotNull { snapshot ->
-                                    snapshot.circle.members
-                                        .firstOrNull { it.key == member.key }
-                                        ?.let { snapshot.day to it.points }
-                                }
-                                PointTrendCard(member.name, memberPoints)
-                            }
-                        } else {
-                            item(key = "tracking-empty") {
-                                Text(
-                                    "Point trends will appear after the first successful hourly sync.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        item(key = "months-heading") {
-                            CircleSectionHeading(
-                                "Monthly history",
-                                "History starts when MaiDex first syncs each month",
-                            )
-                        }
-                        items(history, key = { circle -> "month-${circle.month}-${circle.key}" }) { circle ->
-                            CircleMonthCard(circle, initiallyExpanded = circle === current)
-                        }
+                    if (memberTrends.isNotEmpty()) {
+                        item(key = "member-trend") { MemberTrendCard(memberTrends) }
                     }
+                }
+                item(key = "months-heading") {
+                    SectionHeading(
+                        "Monthly history",
+                        "History starts when MaiDex first syncs each month",
+                    )
+                }
+                items(history, key = { circle -> "month-${circle.month}-${circle.key}" }) { circle ->
+                    CircleMonthCard(circle, initiallyExpanded = circle === current)
+                }
+                val officialPages = current.pages.filter { it.html.isNotBlank() }
+                item(key = "official-heading") {
+                    SectionHeading(
+                        "Official DX NET pages",
+                        if (officialPages.isEmpty()) {
+                            "Read-only copies of DX NET's own Circle pages"
+                        } else {
+                            "${officialPages.size} page" + (if (officialPages.size == 1) "" else "s") +
+                                " from the last sync, as DX NET shows them"
+                        },
+                    )
+                }
+                if (officialPages.isEmpty()) {
+                    item(key = "snapshot-required") {
+                        EmptyState(
+                            icon = Icons.Default.Language,
+                            title = "No official pages captured",
+                            body = "Sync now to capture the official Circle layouts.",
+                        )
+                    }
+                }
+                items(
+                    officialPages,
+                    key = { page -> "page-${page.type}-${page.title}" },
+                ) { page ->
+                    OfficialPageCard(title = page.title, html = page.html)
                 }
             }
         }
@@ -2889,25 +3078,53 @@ private fun CircleDialog(
 }
 
 @Composable
-private fun CircleWebTitle(title: String) {
-    Surface(
+private fun CircleSummaryCard(circle: CircleData) {
+    val metrics = listOfNotNull(
+        formatCount(circle.totalPoints) to "Points",
+        circle.regionalRank?.let { "#${formatCount(it)}" to "Regional rank" },
+        circle.memberCount?.let { it.toString() to "Members" },
+        circle.daysUntilReset?.let { it.toString() to "Days to reset" },
+    )
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        color = DxCircleBlue,
-        shape = RoundedCornerShape(50),
-        border = BorderStroke(2.dp, Color.White),
-        shadowElevation = 2.dp,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            title,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-            color = Color.White,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Black,
-            textAlign = TextAlign.Center,
-        )
+        metrics.forEach { (value, label) ->
+            InfoMetric(value = value, label = label, modifier = Modifier.weight(1f))
+        }
     }
 }
 
+/** An official DX NET page, collapsed by default so the app's own cards stay together above it. */
+@Composable
+private fun OfficialPageCard(title: String, html: String) {
+    var expanded by rememberSaveable(title) { mutableStateOf(false) }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.Language, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                title.ifBlank { "DX NET page" },
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Icon(
+                if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (expanded) "Collapse" else "Expand",
+            )
+        }
+        if (expanded) {
+            OfficialCirclePage(html = html, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
 
 @Composable
 private fun CircleTrackingCard(
@@ -2917,48 +3134,41 @@ private fun CircleTrackingCard(
 ) {
     val isSyncing = importStatus is ImportStatus.Running
     val lastError = (importStatus as? ImportStatus.Failure)?.message ?: settings.lastError
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(2.dp, DxCircleBlueDark),
-        shape = RoundedCornerShape(8.dp),
-    ) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            CircleWebTitle("Circle data sync")
-            val status = when {
-                isSyncing -> "Syncing now…"
-                lastError.isNotBlank() ->
-                    "Last sync failed: $lastError"
-                settings.lastSuccessAt > 0L ->
-                    "Last synced ${formatTrackedTime(settings.lastSuccessAt)}"
-                else -> "Not synced yet"
-            }
-            Text(
-                status,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (lastError.isBlank() || isSyncing) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.error
-                },
-            )
-            Button(
-                onClick = onSync,
-                enabled = !isSyncing,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = DxCirclePink,
-                    contentColor = Color.White,
-                    disabledContainerColor = DxCirclePinkLight,
-                    disabledContentColor = DxCircleInk.copy(alpha = 0.55f),
-                ),
-            ) {
-                Text(
-                    if (isSyncing) "Syncing…" else "Sync now",
-                    fontWeight = FontWeight.Black,
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Circle data sync", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    val status = when {
+                        isSyncing -> "Syncing now…"
+                        lastError.isNotBlank() ->
+                            "Last sync failed: $lastError"
+                        settings.lastSuccessAt > 0L ->
+                            "Last synced ${formatTrackedTime(settings.lastSuccessAt)}"
+                        else -> "Not synced yet"
+                    }
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (lastError.isBlank() || isSyncing) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                    )
+                }
+                Button(onClick = onSync, enabled = !isSyncing) {
+                    if (isSyncing) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (isSyncing) "Syncing…" else "Sync now")
+                }
             }
             Text(
                 "Automatic sync remains scheduled hourly. Android may defer a run because of battery " +
@@ -2970,15 +3180,10 @@ private fun CircleTrackingCard(
     }
 }
 
-
 @Composable
 private fun CircleMonthCard(circle: CircleData, initiallyExpanded: Boolean) {
-    var expanded by remember(circle.month, circle.key) { mutableStateOf(initiallyExpanded) }
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(2.dp, DxCircleBlueDark),
-        shape = RoundedCornerShape(8.dp),
-    ) {
+    var expanded by rememberSaveable(circle.month, circle.key) { mutableStateOf(initiallyExpanded) }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column {
             Row(
                 modifier = Modifier
@@ -2996,11 +3201,9 @@ private fun CircleMonthCard(circle: CircleData, initiallyExpanded: Boolean) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Text(
-                    if (expanded) "Collapse" else "Expand",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
                 )
             }
             if (expanded) {
@@ -3042,20 +3245,17 @@ private fun CircleMonthCard(circle: CircleData, initiallyExpanded: Boolean) {
     }
 }
 
-
 @Composable
-private fun CircleSectionHeading(title: String, subtitle: String) {
+private fun SectionHeading(title: String, subtitle: String) {
     Column(
-        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        CircleWebTitle(title)
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Text(
             subtitle,
-            modifier = Modifier.fillMaxWidth(),
-            style = MaterialTheme.typography.labelSmall,
-            color = DxCircleInk,
-            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -3086,125 +3286,193 @@ private fun CircleInfoRow(label: String, value: String) {
 @Composable
 private fun PointTrendCard(title: String, points: List<Pair<String, Int>>) {
     if (points.isEmpty()) return
-    val values = points.map { it.second }
-    val first = values.first()
-    val latest = values.last()
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(2.dp, DxCircleBlueDark),
-        shape = RoundedCornerShape(8.dp),
-    ) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                Text(
-                    formatCount(latest),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    color = DxCirclePink,
-                )
-                if (latest != first) {
-                    Text(
-                        "  ${if (latest > first) "+" else ""}${formatCount(latest - first)}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            Canvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp)
-                    .padding(top = 8.dp),
+            TrendHeader(title, points)
+            TrendChart(points)
+        }
+    }
+}
+
+/** One trend card for all members: chips pick the member, the signed-in player first. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MemberTrendCard(trends: List<MemberTrend>) {
+    var selectedKey by rememberSaveable { mutableStateOf(trends.first().key) }
+    val selected = trends.firstOrNull { it.key == selectedKey } ?: trends.first()
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Column(Modifier.padding(12.dp)) {
+            TrendHeader(
+                title = if (selected.isCurrentUser) "${selected.name} (you)" else selected.name,
+                points = selected.points,
+            )
+            TrendChart(selected.points)
+            FlowRow(
+                modifier = Modifier.padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                val minimum = values.minOrNull()?.toFloat() ?: 0f
-                val maximum = values.maxOrNull()?.toFloat() ?: minimum
-                val range = (maximum - minimum).takeIf { it > 0f } ?: 1f
-                val step = if (values.size > 1) size.width / values.lastIndex else 0f
-                fun point(index: Int): androidx.compose.ui.geometry.Offset {
-                    val x = if (values.size == 1) size.width / 2f else index * step
-                    val y = size.height - ((values[index] - minimum) / range * size.height)
-                    return androidx.compose.ui.geometry.Offset(x, y)
-                }
-                values.indices.drop(1).forEach { index ->
-                    drawLine(
-                        color = Color(0xFF087BA8),
-                        start = point(index - 1),
-                        end = point(index),
-                        strokeWidth = 2.dp.toPx(),
-                        cap = StrokeCap.Round,
+                trends.forEach { trend ->
+                    FilterChip(
+                        selected = trend.key == selected.key,
+                        onClick = { selectedKey = trend.key },
+                        label = { Text(if (trend.isCurrentUser) "${trend.name} (you)" else trend.name) },
                     )
                 }
-                values.indices.forEach { index ->
-                    drawCircle(
-                        color = Color(0xFF087BA8),
-                        radius = 2.5.dp.toPx(),
-                        center = point(index),
-                    )
-                }
-            }
-            Row(Modifier.fillMaxWidth()) {
-                Text(
-                    points.first().first,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    points.last().first,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }
 }
 
 @Composable
-private fun PlayCountHistoryDialog(
-    snapshots: List<PlayCountSnapshot>,
-    onDismiss: () -> Unit,
-) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+private fun TrendHeader(title: String, points: List<Pair<String, Int>>) {
+    val first = points.first().second
+    val latest = points.last().second
+    Row(verticalAlignment = Alignment.Bottom) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Bold)
+            Text(
+                "${points.size} day" + (if (points.size == 1) "" else "s") + " · since ${points.first().first}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                formatCount(latest),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            if (latest != first) {
+                Text(
+                    "${if (latest > first) "+" else ""}${formatCount(latest - first)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (latest > first) MaiDexTheme.colors.positive else MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+/** Line chart with a light grid, the highest and lowest value on the left and the first and last day below. */
+@Composable
+private fun TrendChart(points: List<Pair<String, Int>>) {
+    val values = points.map { it.second }
+    val minimum = values.min()
+    val maximum = values.max()
+    val lineColor = MaterialTheme.colorScheme.primary
+    val gridColor = MaterialTheme.colorScheme.outlineVariant
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+            .height(96.dp),
     ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(0.92f),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(end = 6.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.End,
         ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "Play-count history",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Black,
-                        )
-                        Text(
-                            "${snapshots.size} daily snapshot" + if (snapshots.size == 1) "" else "s",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    TextButton(onClick = onDismiss) { Text("Close") }
-                }
-                if (snapshots.isEmpty()) {
-                    Text("No play-count snapshots have been captured yet.")
+            Text(formatCount(maximum), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (maximum != minimum) {
+                Text(formatCount(minimum), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Canvas(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .padding(vertical = 6.dp),
+        ) {
+            val range = (maximum - minimum).toFloat().takeIf { it > 0f } ?: 1f
+            val step = if (values.size > 1) size.width / values.lastIndex else 0f
+            fun point(index: Int): androidx.compose.ui.geometry.Offset {
+                val x = if (values.size == 1) size.width / 2f else index * step
+                val y = if (maximum == minimum) {
+                    size.height / 2f
                 } else {
-                    PointTrendCard(
-                        title = "Current version play count",
-                        points = snapshots.map { it.day to it.currentVersionPlayCount },
-                    )
-                    PointTrendCard(
-                        title = "maimaiDX total play count",
-                        points = snapshots.map { it.day to it.totalPlayCount },
-                    )
+                    size.height - ((values[index] - minimum) / range * size.height)
                 }
+                return androidx.compose.ui.geometry.Offset(x, y)
+            }
+            listOf(0f, 0.5f, 1f).forEach { fraction ->
+                val y = size.height * fraction
+                drawLine(gridColor, start = androidx.compose.ui.geometry.Offset(0f, y), end = androidx.compose.ui.geometry.Offset(size.width, y), strokeWidth = 1.dp.toPx())
+            }
+            if (values.size > 1) {
+                val area = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(point(0).x, size.height)
+                    values.indices.forEach { lineTo(point(it).x, point(it).y) }
+                    lineTo(point(values.lastIndex).x, size.height)
+                    close()
+                }
+                drawPath(area, lineColor.copy(alpha = 0.12f))
+            }
+            values.indices.drop(1).forEach { index ->
+                drawLine(
+                    color = lineColor,
+                    start = point(index - 1),
+                    end = point(index),
+                    strokeWidth = 2.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+            }
+            values.indices.forEach { index ->
+                drawCircle(color = lineColor, radius = 2.5.dp.toPx(), center = point(index))
+            }
+        }
+    }
+    Row(Modifier.fillMaxWidth()) {
+        Text(
+            points.first().first,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            points.last().first,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun PlayCountHistoryScreen(
+    snapshots: List<PlayCountSnapshot>,
+    onBack: () -> Unit,
+) {
+    SecondaryScreen(
+        title = "Play-count history",
+        subtitle = "${snapshots.size} daily snapshot" + if (snapshots.size == 1) "" else "s",
+        onBack = onBack,
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(padding)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (snapshots.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Default.BarChart,
+                    title = "No play counts yet",
+                    body = "MaiDex records your play counts once a day when it syncs with DX NET.",
+                )
+            } else {
+                PointTrendCard(
+                    title = "Current version play count",
+                    points = snapshots.map { it.day to it.currentVersionPlayCount },
+                )
+                PointTrendCard(
+                    title = "maimaiDX total play count",
+                    points = snapshots.map { it.day to it.totalPlayCount },
+                )
             }
         }
     }
@@ -3228,77 +3496,62 @@ internal class MedalTableExpansionState {
 }
 
 @Composable
-internal fun ScoreStatsDialog(
+internal fun ScoreStatsScreen(
     charts: List<SongChart>,
     scores: Map<String, UserScore>,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
     onChart: (SongChart) -> Unit,
+    onOpenAccount: () -> Unit,
 ) {
     val summary = remember(charts, scores) { ScoreAnalytics.summarize(charts, scores) }
     val expandedTables = remember { MedalTableExpansionState() }
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(
+    SecondaryScreen(
+        title = "Score stats",
+        subtitle = if (summary.playedCharts > 0) "${summary.playedCharts} matched scores" else null,
+        onBack = onBack,
+    ) { padding ->
+        if (summary.playedCharts == 0) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center,
+            ) {
+                EmptyState(
+                    icon = Icons.Default.BarChart,
+                    title = "No scores imported yet",
+                    body = "Import your DX NET scores to see personal bests and medal counts for every level.",
+                ) {
+                    Button(onClick = onOpenAccount) { Text("Open DX NET account") }
+                }
+            }
+            return@SecondaryScreen
+        }
+        LazyColumn(
             modifier = Modifier
-                .fillMaxWidth(0.96f)
-                .fillMaxHeight(0.94f),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "Score stats",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Black,
-                        )
-                        Text(
-                            "${summary.playedCharts} matched scores",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    TextButton(onClick = onDismiss) { Text("Close") }
+            item(key = "bests") {
+                BestScoresCard(summary, onChart)
+            }
+            summary.levelTables.forEachIndexed { index, table ->
+                item(key = "standard-levels-$index") {
+                    MedalTableCard(
+                        table = table,
+                        expanded = expandedTables[table.title],
+                        onExpandedChange = { expandedTables[table.title] = it },
+                    )
                 }
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = 10.dp,
-                        end = 10.dp,
-                        bottom = 18.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    item(key = "bests") {
-                        BestScoresCard(summary, onChart)
-                    }
-                    summary.levelTables.forEachIndexed { index, table ->
-                        item(key = "standard-levels-$index") {
-                            MedalTableCard(
-                                table = table,
-                                expanded = expandedTables[table.title],
-                                onExpandedChange = { expandedTables[table.title] = it },
-                            )
-                        }
-                    }
-                    item(key = "utage-levels") {
-                        MedalTableCard(
-                            table = summary.utage,
-                            expanded = expandedTables[summary.utage.title],
-                            onExpandedChange = { expandedTables[summary.utage.title] = it },
-                        )
-                    }
-                }
+            }
+            item(key = "utage-levels") {
+                MedalTableCard(
+                    table = summary.utage,
+                    expanded = expandedTables[summary.utage.title],
+                    onExpandedChange = { expandedTables[summary.utage.title] = it },
+                )
             }
         }
     }
@@ -3487,36 +3740,48 @@ private fun MedalTableCard(
     }
 }
 
+@Composable
 private fun medalRowColor(label: String): Color = when (label) {
-    "FC", "FC+" -> Color(0xFFE6F1FF)
-    "AP", "AP+" -> Color(0xFFFFF0D8)
-    "FS", "FS+" -> Color(0xFFE0F7F4)
-    else -> Color(0xFFF2E8FF)
-}
-
-private fun medalLabelColor(label: String): Color = when (label) {
-    "FC", "FC+" -> Color(0xFF086AA7)
-    "AP", "AP+" -> Color(0xFFA65A00)
-    "FS", "FS+" -> Color(0xFF00796B)
-    else -> Color(0xFF6A36A8)
+    "FC", "FC+" -> MaiDexTheme.colors.medalComboRow
+    "AP", "AP+" -> MaiDexTheme.colors.medalPerfectRow
+    "FS", "FS+" -> MaiDexTheme.colors.medalSyncRow
+    else -> MaiDexTheme.colors.medalOtherRow
 }
 
 @Composable
-private fun ProfileCardCloseUpDialog(
+private fun medalLabelColor(label: String): Color = when (label) {
+    "FC", "FC+" -> MaiDexTheme.colors.medalComboLabel
+    "AP", "AP+" -> MaiDexTheme.colors.medalPerfectLabel
+    "FS", "FS+" -> MaiDexTheme.colors.medalSyncLabel
+    else -> MaiDexTheme.colors.medalOtherLabel
+}
+
+@Composable
+private fun ProfileCardScreen(
     profile: PlayerProfile,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
 ) {
-    var rotated by remember { mutableStateOf(false) }
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
+    var rotated by rememberSaveable { mutableStateOf(false) }
+    SecondaryScreen(
+        title = "Profile card",
+        subtitle = profile.name,
+        onBack = onBack,
+        actions = {
+            TextButton(onClick = { rotated = !rotated }) {
+                Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null)
+                Spacer(Modifier.width(5.dp))
+                Text(if (rotated) "Return card" else "Rotate · larger")
+            }
+        },
+    ) { padding ->
         BoxWithConstraints(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
             contentAlignment = Alignment.Center,
         ) {
             val naturalWidth = if (rotated) {
-                (maxHeight * 0.86f).coerceAtMost(720.dp)
+                (maxHeight * 0.92f).coerceAtMost(720.dp)
             } else {
                 (maxWidth * 0.96f).coerceAtMost(720.dp)
             }
@@ -3528,28 +3793,6 @@ private fun ProfileCardCloseUpDialog(
                     .requiredHeight(naturalHeight)
                     .graphicsLayer(rotationZ = if (rotated) 90f else 0f),
             )
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 12.dp),
-                color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.94f),
-                shape = RoundedCornerShape(50),
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(onClick = { rotated = !rotated }) {
-                        Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null)
-                        Spacer(Modifier.width(5.dp))
-                        Text(if (rotated) "Return card" else "Rotate · larger")
-                    }
-                    TextButton(onClick = onDismiss) {
-                        Text("Close")
-                    }
-                }
-            }
         }
     }
 }
@@ -3851,121 +4094,118 @@ private fun DxNetRankImage(
 
 
 @Composable
-private fun ChartDetailDialog(
+private fun ChartDetailScreen(
     chart: SongChart,
     score: UserScore?,
     playDetail: PlayDetail?,
     state: CatalogUiState,
     onOpenGuide: (String) -> Unit,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
+    SecondaryScreen(
+        title = chart.title,
+        subtitle = "${chart.displayType} · ${chart.displayDifficulty}",
+        onBack = onBack,
+    ) { padding ->
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.94f),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(padding)
+                .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
-            Column(
+            AsyncImage(
+                model = chart.imageUrl,
+                contentDescription = "Cover art for ${chart.title}",
                 modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
+                    .size(180.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .align(Alignment.CenterHorizontally),
+                contentScale = ContentScale.Crop,
+            )
+            Spacer(Modifier.height(14.dp))
+            SongTitleIdentity(chart, prominent = true)
+            Spacer(Modifier.height(12.dp))
+            DetailRow("Artist", titleWithRomanization(chart.artist, chart.artistRomanized))
+            DetailRow("Category", chart.category)
+            DetailRow("BPM", chart.bpm?.toString() ?: "Unknown")
+            DetailRow(
+                "Released",
+                listOfNotNull(chart.releaseDate, chart.songVersion.takeIf(String::isNotBlank))
+                    .joinToString("  ·  "),
+            )
+            chart.unlockInfo.forEach { info ->
+                UnlockDetailInfo(
+                    info = info,
+                    onOpenGuide = info.guideEntryId?.let { entryId ->
+                        { onOpenGuide(entryId) }
+                    },
+                    onOpenSource = {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.sourceUrl)))
+                    },
+                )
+            }
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+            Text("Chart", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                AsyncImage(
-                    model = chart.imageUrl,
-                    contentDescription = "Cover art for ${chart.title}",
-                    modifier = Modifier
-                        .size(180.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .align(Alignment.CenterHorizontally),
-                    contentScale = ContentScale.Crop,
-                )
-                Spacer(Modifier.height(14.dp))
-                SongTitleIdentity(chart, prominent = true)
-                Spacer(Modifier.height(12.dp))
-                DetailRow("Artist", titleWithRomanization(chart.artist, chart.artistRomanized))
-                DetailRow("Category", chart.category)
-                DetailRow("BPM", chart.bpm?.toString() ?: "Unknown")
-                DetailRow(
-                    "Released",
-                    listOfNotNull(chart.releaseDate, chart.songVersion.takeIf(String::isNotBlank))
-                        .joinToString("  ·  "),
-                )
-                chart.unlockInfo.forEach { info ->
-                    UnlockDetailInfo(
-                        info = info,
-                        onOpenGuide = info.guideEntryId?.let { entryId ->
-                            { onOpenGuide(entryId) }
-                        },
-                        onOpenSource = {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.sourceUrl)))
-                        },
-                    )
-                }
-                HorizontalDivider(Modifier.padding(vertical = 12.dp))
-                Text("Chart", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Row(
-                    modifier = Modifier.padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Surface(color = difficultyColor(chart.difficulty), shape = RoundedCornerShape(8.dp)) {
-                        Text(
-                            chart.displayDifficulty,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            color = Color.White,
-                            fontWeight = FontWeight.Black,
-                        )
-                    }
+                Surface(color = difficultyColor(chart.difficulty), shape = RoundedCornerShape(8.dp)) {
                     Text(
-                        "${chart.level ?: "?"} (${chart.constant?.let { String.format(Locale.US, "%.1f", it) } ?: "unknown"})",
-                        style = MaterialTheme.typography.titleLarge,
+                        chart.displayDifficulty,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        color = Color.White,
                         fontWeight = FontWeight.Black,
                     )
-                    Text(chart.displayType)
                 }
-                DetailRow("Chart version", chart.chartVersion.orEmpty())
-                DetailRow(
-                    "Notes designer",
-                    titleWithRomanization(chart.noteDesigner.orEmpty(), chart.noteDesignerRomanized),
+                Text(
+                    listOfNotNull(
+                        chart.level?.let { "Lv $it" },
+                        chart.constant?.let { "constant ${String.format(Locale.US, "%.1f", it)}" },
+                    ).joinToString(" · ").ifEmpty { "Level unknown" },
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
                 )
-                DetailRow("Regions", chart.regions.codes().joinToString { regionLabel(it) })
-                Spacer(Modifier.height(8.dp))
-                NoteCountTable(chart)
-                if (score != null) {
-                    ScoreSection(chart, score, playDetail, state)
-                } else {
-                    HorizontalDivider(Modifier.padding(vertical = 12.dp))
-                    Text("My score", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(
-                        "Sign in to DX NET to import this chart's achievement, rank, and medals.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Text(chart.displayType)
+            }
+            DetailRow("Chart version", chart.chartVersion.orEmpty())
+            DetailRow(
+                "Notes designer",
+                titleWithRomanization(chart.noteDesigner.orEmpty(), chart.noteDesignerRomanized),
+            )
+            DetailRow("Regions", chart.regions.codes().joinToString { regionLabel(it) })
+            Spacer(Modifier.height(8.dp))
+            NoteCountTable(chart)
+            if (score != null) {
+                ScoreSection(chart, score, playDetail, state)
+            } else {
+                HorizontalDivider(Modifier.padding(vertical = 12.dp))
+                Text("My score", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    "Sign in to DX NET to import this chart's achievement, rank, and medals.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            chart.comment?.takeIf(String::isNotBlank)?.let {
+                HorizontalDivider(Modifier.padding(vertical = 12.dp))
+                Text(it)
+            }
+            Spacer(Modifier.height(18.dp))
+            Button(
+                onClick = {
+                    val query = Uri.encode("${chart.title} maimai ${chart.displayDifficulty}")
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=$query")),
                     )
-                }
-                chart.comment?.takeIf(String::isNotBlank)?.let {
-                    HorizontalDivider(Modifier.padding(vertical = 12.dp))
-                    Text(it)
-                }
-                Spacer(Modifier.height(18.dp))
-                Button(
-                    onClick = {
-                        val query = Uri.encode("${chart.title} maimai ${chart.displayDifficulty}")
-                        context.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=$query")),
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Search on YouTube")
-                }
-                OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                    Text("Close")
-                }
-                Spacer(Modifier.navigationBarsPadding())
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Search on YouTube")
             }
         }
     }
@@ -4320,6 +4560,13 @@ private fun regionLabel(value: String): String = when (value) {
     else -> value
 }
 
+/** [difficultyColor] for text on a light tint of itself; lightened on dark surfaces so it stays readable. */
+@Composable
+private fun difficultyTextColor(value: String): Color {
+    val base = difficultyColor(value)
+    return if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) lerp(base, Color.White, 0.45f) else base
+}
+
 private fun difficultyColor(value: String): Color = when (value) {
     "basic" -> Color(0xFF189B4E)
     "advanced" -> Color(0xFFD87300)
@@ -4331,15 +4578,16 @@ private fun difficultyColor(value: String): Color = when (value) {
 
 
 
+@Composable
 private fun scorePanelColor(grade: Grade): Color = when (grade) {
     Grade.SSS_PLUS,
     Grade.SSS,
-    -> Color(0xFFFFF1C7)
+    -> MaiDexTheme.colors.scoreGold
     Grade.SS_PLUS,
     Grade.SS,
-    -> Color(0xFFDDEBFF)
+    -> MaiDexTheme.colors.scoreBlue
     Grade.S_PLUS,
     Grade.S,
-    -> Color(0xFFFFE1E8)
-    else -> Color.White.copy(alpha = 0.9f)
+    -> MaiDexTheme.colors.scoreRed
+    else -> MaiDexTheme.colors.scoreNeutral
 }

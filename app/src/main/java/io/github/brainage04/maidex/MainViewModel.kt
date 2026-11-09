@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.brainage04.maidex.data.AccountRegion
+import io.github.brainage04.maidex.data.AppSettingsStore
 import io.github.brainage04.maidex.data.CatalogInfo
 import io.github.brainage04.maidex.data.CatalogRepository
 import io.github.brainage04.maidex.data.CatalogUpdateScheduler
@@ -22,6 +23,7 @@ import io.github.brainage04.maidex.data.PlayCountSnapshot
 import io.github.brainage04.maidex.data.UserDataRepository
 import io.github.brainage04.maidex.data.TrackingSettings
 import io.github.brainage04.maidex.data.UserScore
+import io.github.brainage04.maidex.data.ThemeMode
 import io.github.brainage04.maidex.network.MaimaiDxClient
 import io.github.brainage04.maidex.rating.RatingCalculator
 import io.github.brainage04.maidex.data.normalizeSearch
@@ -71,6 +73,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** One-off in-app messages marking the start and end of an automatic update; buffered until shown. */
     val autoUpdateMessages: Flow<String> = autoUpdateEvents.receiveAsFlow()
+
+    private val appSettings = AppSettingsStore(application)
+    private val themeModeState = MutableStateFlow(appSettings.themeMode())
+    val themeMode: StateFlow<ThemeMode> = themeModeState
+
+    fun setThemeMode(mode: ThemeMode) {
+        appSettings.setThemeMode(mode)
+        themeModeState.value = mode
+    }
 
     private val trackingData = combine(
         circleHistory,
@@ -172,6 +183,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     init {
+        loadCatalog()
+        viewModelScope.launch {
+            reloadUserData()
+            if (profile.value != null) {
+                CircleTrackingScheduler.schedule(application)
+            }
+        }
+        viewModelScope.launch { reloadAutoLoginState() }
+        viewModelScope.launch { observeAutoUpdates() }
+    }
+
+    /** Loads the catalog; also the "Try again" action of the catalog error screen. */
+    fun loadCatalog() {
+        if (snapshot.value != null) return
+        error.value = null
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -185,18 +211,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }.onSuccess { loaded ->
                 snapshot.value = loaded
-                CatalogUpdateScheduler.schedule(application)
+                CatalogUpdateScheduler.schedule(getApplication())
             }
                 .onFailure { failure -> error.value = failure.message ?: "Unable to load catalog" }
         }
-        viewModelScope.launch {
-            reloadUserData()
-            if (profile.value != null) {
-                CircleTrackingScheduler.schedule(application)
-            }
-        }
-        viewModelScope.launch { reloadAutoLoginState() }
-        viewModelScope.launch { observeAutoUpdates() }
     }
 
     private suspend fun reloadUserData() {

@@ -18,4 +18,18 @@ class CatalogRepositoryTest {
         assertTrue(chart.searchableText.contains(normalizeSearch(chart.artist)))
         assertTrue(chart.searchableText.contains(normalizeSearch(chart.noteDesigner.orEmpty())))
     }
+
+    @Test
+    fun damagedInstalledCatalogFallsBackToTheBundledDatabase() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val installed = java.io.File(
+            context.filesDir,
+            "catalog-${io.github.brainage04.maidex.BuildConfig.VERSION_CODE}.db",
+        )
+        installed.writeText("not a SQLite database ".repeat(64))
+
+        val charts = CatalogRepository(context).load().charts
+
+        assertTrue(charts.isNotEmpty())
+    }
 }

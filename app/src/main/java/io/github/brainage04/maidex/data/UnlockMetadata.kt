@@ -113,6 +113,14 @@ internal object UnlockMetadata {
         ),
     )
 
+    /** How a section's entries unlock; it is the same for every entry, so the guide shows it once. */
+    fun sectionIntro(section: UnlockGuideSection): String = when (section) {
+        UnlockGuideSection.CHIHOS ->
+            "International area progression. Final tracks may use a life-mode Perfect Challenge whose Life allowance relaxes over time."
+        UnlockGuideSection.CLASS_BATTLES ->
+            "Defeat the final Friend Matching class boss and reach LEGEND, or play with a LEGEND-class conductor. A previous version's Gift Song becomes available by default after the next version update."
+    }
+
     val guideEntries: List<UnlockGuideEntry> =
         areaGroups.map { area ->
             UnlockGuideEntry(
@@ -121,7 +129,6 @@ internal object UnlockMetadata {
                 title = area.name,
                 titleRomanized = area.nameRomanized,
                 subtitle = "${area.songs.size} unlock ${if (area.songs.size == 1) "song" else "songs"}",
-                details = "International area progression. Final tracks may use a life-mode Perfect Challenge whose Life allowance relaxes over time.",
                 songs = area.songs,
                 sourceUrl = CIRCLE_ASIA_SOURCE,
             )
@@ -132,7 +139,6 @@ internal object UnlockMetadata {
                 title = battle.version,
                 titleRomanized = battle.version,
                 subtitle = "Conduction / Gift ${if (battle.songs.size == 1) "Song" else "Songs"}",
-                details = "Defeat the final Friend Matching class boss and reach LEGEND, or play with a LEGEND-class conductor. A previous version's Gift Song becomes available by default after the next version update.",
                 songs = battle.songs,
                 sourceUrl = FRIEND_MATCHING_SOURCE,
             )

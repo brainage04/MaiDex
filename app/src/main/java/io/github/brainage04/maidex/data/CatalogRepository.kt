@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.ContentValues
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteException
 import io.github.brainage04.maidex.BuildConfig
 import android.util.JsonReader
 import android.util.JsonToken
@@ -34,12 +35,26 @@ class CatalogRepository(private val context: Context) {
 
     fun load(): CatalogSnapshot = synchronized(CATALOG_LOCK) {
         ensureDatabase()
+        try {
+            readSnapshot()
+        } catch (_: SQLiteException) {
+            // The installed copy is damaged (for example a refresh cut short). Reinstall the bundled
+            // catalog, the offline fallback, and forget the source ETag so the next hourly check
+            // downloads the published catalog again instead of answering "not modified".
+            databaseFile.delete()
+            updatePreferences.edit().remove(PREF_SOURCE_ETAG).apply()
+            ensureDatabase()
+            readSnapshot()
+        }
+    }
+
+    private fun readSnapshot(): CatalogSnapshot {
         val database = SQLiteDatabase.openDatabase(
             databaseFile.absolutePath,
             null,
             SQLiteDatabase.OPEN_READONLY,
         )
-        database.use {
+        return database.use {
             CatalogSnapshot(
                 charts = loadCharts(it),
                 options = loadOptions(it),
