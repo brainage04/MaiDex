@@ -480,6 +480,8 @@ private fun CatalogRoot(
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    // Same gap below the message as EmptyState leaves above it (8 + 4 + 8 dp).
+                    Spacer(Modifier.height(4.dp))
                     Button(onClick = onRetry) {
                         Icon(Icons.Default.Refresh, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
