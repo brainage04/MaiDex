@@ -138,27 +138,17 @@ private val DarkExtended = MaiDexExtendedColors(
 )
 
 private val LocalExtendedColors = staticCompositionLocalOf { LightExtended }
-private val LocalDarkTheme = staticCompositionLocalOf { false }
 
 object MaiDexTheme {
     val colors: MaiDexExtendedColors
         @Composable
         @ReadOnlyComposable
         get() = LocalExtendedColors.current
-
-    /** Whether the app is drawing its dark theme (Settings choice, or the system's when on System). */
-    val isDark: Boolean
-        @Composable
-        @ReadOnlyComposable
-        get() = LocalDarkTheme.current
 }
 
 @Composable
 fun MaiDexTheme(darkTheme: Boolean, content: @Composable () -> Unit) {
-    CompositionLocalProvider(
-        LocalExtendedColors provides if (darkTheme) DarkExtended else LightExtended,
-        LocalDarkTheme provides darkTheme,
-    ) {
+    CompositionLocalProvider(LocalExtendedColors provides if (darkTheme) DarkExtended else LightExtended) {
         MaterialTheme(
             colorScheme = if (darkTheme) DarkColors else LightColors,
             content = content,
