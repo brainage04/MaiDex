@@ -465,8 +465,18 @@ private fun CatalogRoot(
                 EmptyState(
                     icon = Icons.Default.ErrorOutline,
                     title = "The song catalog could not be opened",
-                    body = "${state.error} The menu still opens your account, guides and settings.",
+                    body = "MaiDex could not read its offline song catalog. Your account, guides and " +
+                        "settings are still in the menu.",
                 ) {
+                    Text(
+                        // SQLite messages carry the whole failing query; the first clause is enough.
+                        state.error.orEmpty().substringBefore(", while compiling"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     Button(onClick = onRetry) {
                         Icon(Icons.Default.Refresh, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
@@ -1945,7 +1955,11 @@ private fun UnlockGuideScreen(
                     ) {
                         Icon(Icons.Default.Info, contentDescription = null, tint = MaiDexTheme.colors.info)
                         Text(
-                            UnlockMetadata.sectionIntro(section),
+                            UnlockMetadata.sectionIntro(section) + if (profile == null) {
+                                "\n\nImport your DX NET data from the account page to see your progress here."
+                            } else {
+                                ""
+                            },
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -1990,16 +2004,15 @@ private fun UnlockGuideScreen(
     }
 }
 
-/** Progress line of a Chiho card. Map completion comes from DX NET, so it needs an imported profile. */
+/** Progress line of a Chiho card. Map completion comes from the imported DX NET profile. */
 internal fun chihoStatusText(
     playedSongs: Int,
     totalSongs: Int,
     mapComplete: Boolean,
-    signedIn: Boolean,
-): String = when {
-    mapComplete -> "Map complete on DX NET"
-    signedIn -> "$playedSongs/$totalSongs unlock songs played"
-    else -> "Sign in to DX NET to track this area"
+): String = if (mapComplete) {
+    "Map complete on DX NET"
+} else {
+    "$playedSongs/$totalSongs unlock songs played"
 }
 
 @Composable
@@ -2087,68 +2100,71 @@ private fun UnlockGuideEntryCard(
                     )
                 }
             }
-            Spacer(Modifier.height(6.dp))
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.68f),
-                shape = RoundedCornerShape(10.dp),
-            ) {
-                Column(
-                    modifier = Modifier.padding(9.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
+            // Progress needs imported data; without it every card would repeat the same hint, so the
+            // section intro says it once instead.
+            if (profile != null) {
+                Spacer(Modifier.height(6.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.68f),
+                    shape = RoundedCornerShape(10.dp),
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                    Column(
+                        modifier = Modifier.padding(9.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
-                        Icon(
-                            imageVector = if (completedChiho || allClassesCleared) {
-                                Icons.Default.CheckCircle
-                            } else {
-                                Icons.Default.RadioButtonUnchecked
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = if (completedChiho || allClassesCleared) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSecondaryContainer
-                            },
-                        )
-                        Text(
-                            text = when {
-                                isChiho -> chihoStatusText(
-                                    playedSongs = playedUnlockSongs,
-                                    totalSongs = entry.songs.size,
-                                    mapComplete = completedChiho,
-                                    signedIn = profile != null,
-                                )
-                                isCurrentClassVersion && profile?.friendClass.equals("LEGEND", ignoreCase = true) ->
-                                    "LEGEND · all ${milestones.size} classes cleared"
-                                isCurrentClassVersion && profile?.friendClass.isNullOrBlank() ->
-                                    "Sync DX NET to track the current class"
-                                isCurrentClassVersion ->
-                                    "$clearedClasses/${milestones.size} classes cleared · current ${profile?.friendClass}"
-                                else ->
-                                    "Historical season · best scores imported for $milestoneScores/${milestones.size} bosses"
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = if (completedChiho || allClassesCleared) {
+                                    Icons.Default.CheckCircle
+                                } else {
+                                    Icons.Default.RadioButtonUnchecked
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = if (completedChiho || allClassesCleared) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                },
+                            )
+                            Text(
+                                text = when {
+                                    isChiho -> chihoStatusText(
+                                        playedSongs = playedUnlockSongs,
+                                        totalSongs = entry.songs.size,
+                                        mapComplete = completedChiho,
+                                    )
+                                    isCurrentClassVersion && profile?.friendClass.equals("LEGEND", ignoreCase = true) ->
+                                        "LEGEND · all ${milestones.size} classes cleared"
+                                    isCurrentClassVersion && profile?.friendClass.isNullOrBlank() ->
+                                        "Sync DX NET to track the current class"
+                                    isCurrentClassVersion ->
+                                        "$clearedClasses/${milestones.size} classes cleared · current ${profile?.friendClass}"
+                                    else ->
+                                        "Historical season · best scores imported for $milestoneScores/${milestones.size} bosses"
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        val progress = when {
+                            isChiho && completedChiho -> 1f
+                            isChiho && entry.songs.isNotEmpty() ->
+                                playedUnlockSongs.toFloat() / entry.songs.size
+                            isCurrentClassVersion && milestones.isNotEmpty() ->
+                                clearedClasses.toFloat() / milestones.size
+                            milestones.isNotEmpty() -> milestoneScores.toFloat() / milestones.size
+                            else -> 0f
+                        }
+                        LinearProgressIndicator(
+                            progress = { progress.coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                    val progress = when {
-                        isChiho && completedChiho -> 1f
-                        isChiho && entry.songs.isNotEmpty() ->
-                            playedUnlockSongs.toFloat() / entry.songs.size
-                        isCurrentClassVersion && milestones.isNotEmpty() ->
-                            clearedClasses.toFloat() / milestones.size
-                        milestones.isNotEmpty() -> milestoneScores.toFloat() / milestones.size
-                        else -> 0f
-                    }
-                    LinearProgressIndicator(
-                        progress = { progress.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -2187,7 +2203,9 @@ private fun UnlockGuideEntryCard(
                                     classBattleScoreKey(milestone.songTitle, milestone.level)
                                 ] ?: bestScoresBySong[unlockProgressSongKey(milestone.songTitle)],
                                 cleared = isCurrentClassVersion && index < clearedClasses,
+                                // Without an imported class there is no current one to highlight.
                                 current = isCurrentClassVersion &&
+                                    !profile?.friendClass.isNullOrBlank() &&
                                     index == clearedClasses &&
                                     !profile?.friendClass.equals("LEGEND", ignoreCase = true),
                                 chart = chartFor(milestone.songTitle, milestone.level),
@@ -3085,12 +3103,18 @@ private fun CircleSummaryCard(circle: CircleData) {
         circle.memberCount?.let { it.toString() to "Members" },
         circle.daysUntilReset?.let { it.toString() to "Days to reset" },
     )
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        metrics.forEach { (value, label) ->
-            InfoMetric(value = value, label = label, modifier = Modifier.weight(1f))
+    // Two per row: four tiles in one row wrap large point totals mid-number.
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        metrics.chunked(2).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                row.forEach { (value, label) ->
+                    InfoMetric(value = value, label = label, modifier = Modifier.weight(1f))
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
         }
     }
 }

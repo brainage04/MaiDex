@@ -133,9 +133,8 @@ class GuideSearchTest {
 
     @Test
     fun `chiho status explains progress without the unconfirmed-map wording`() {
-        assertEquals("Map complete on DX NET", chihoStatusText(1, 4, mapComplete = true, signedIn = true))
-        assertEquals("2/4 unlock songs played", chihoStatusText(2, 4, mapComplete = false, signedIn = true))
-        assertEquals("Sign in to DX NET to track this area", chihoStatusText(0, 4, mapComplete = false, signedIn = false))
+        assertEquals("Map complete on DX NET", chihoStatusText(1, 4, mapComplete = true))
+        assertEquals("2/4 unlock songs played", chihoStatusText(2, 4, mapComplete = false))
     }
 
     private fun score(key: String) = UserScore(
