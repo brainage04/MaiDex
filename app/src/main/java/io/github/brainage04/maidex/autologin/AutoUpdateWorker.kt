@@ -97,6 +97,7 @@ class AutoUpdateWorker(
         const val KEY_FINISHED_AT = "finished_at"
         const val OUTCOME_UPDATED = "updated"
         const val OUTCOME_FAILED = "failed"
+        const val OUTCOME_MAINTENANCE = "maintenance"
         const val OUTCOME_SKIPPED = "skipped"
         const val STARTED_MESSAGE = "Updating your DX NET data…"
     }
@@ -113,6 +114,10 @@ private fun AutoUpdateOutcome.toData(): Data = when (this) {
     is AutoUpdateOutcome.Failed -> workDataOf(
         AutoUpdateWorker.KEY_OUTCOME to AutoUpdateWorker.OUTCOME_FAILED,
         AutoUpdateWorker.KEY_MESSAGE to message,
+    )
+    AutoUpdateOutcome.Maintenance -> workDataOf(
+        AutoUpdateWorker.KEY_OUTCOME to AutoUpdateWorker.OUTCOME_MAINTENANCE,
+        AutoUpdateWorker.KEY_MESSAGE to AutoUpdateOutcome.Maintenance.summary,
     )
     is AutoUpdateOutcome.Skipped -> workDataOf(AutoUpdateWorker.KEY_OUTCOME to AutoUpdateWorker.OUTCOME_SKIPPED)
 }
@@ -152,7 +157,11 @@ class AutoUpdateNotifier(private val context: Context) {
     fun showFinished(outcome: AutoUpdateOutcome.Finished) = post(
         base()
             .setContentTitle(
-                if (outcome is AutoUpdateOutcome.Updated) "maimai DX NET data updated" else "maimai DX NET update failed",
+                when (outcome) {
+                    is AutoUpdateOutcome.Updated -> "maimai DX NET data updated"
+                    AutoUpdateOutcome.Maintenance -> "maimai DX NET update postponed"
+                    is AutoUpdateOutcome.Failed -> "maimai DX NET update failed"
+                },
             )
             .setContentText(outcome.summary)
             .setStyle(NotificationCompat.BigTextStyle().bigText(outcome.summary))

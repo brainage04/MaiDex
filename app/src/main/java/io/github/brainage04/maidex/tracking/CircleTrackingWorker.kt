@@ -21,6 +21,7 @@ import io.github.brainage04.maidex.autologin.RefreshResult
 import io.github.brainage04.maidex.data.AccountRegion
 import io.github.brainage04.maidex.data.UserDataRepository
 import io.github.brainage04.maidex.network.AuthenticationRequiredException
+import io.github.brainage04.maidex.network.DxNetMaintenanceException
 import io.github.brainage04.maidex.network.MaimaiDxClient
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -98,6 +99,7 @@ internal suspend fun runTrackingSync(
     when (val outcome = runner.recoverExpiredSession(region, sync)) {
         is AutoUpdateOutcome.Updated -> Unit
         is AutoUpdateOutcome.Failed -> recordFailure(outcome.message)
+        AutoUpdateOutcome.Maintenance -> recordFailure(AutoUpdateOutcome.Maintenance.summary)
         is AutoUpdateOutcome.Skipped -> recordFailure(expired.message ?: "DX NET login expired; sign in again")
     }
     TrackingSyncResult.DONE
@@ -139,5 +141,6 @@ object CircleTrackingScheduler {
 
 internal const val TRACKING_REPEAT_INTERVAL_HOURS = 1L
 
+/** Maintenance lasts an hour or more, so the next hourly run tries again rather than a quick retry. */
 internal fun shouldRetryHourlySync(failure: Exception, runAttemptCount: Int): Boolean =
-    failure !is AuthenticationRequiredException && runAttemptCount < 2
+    failure !is AuthenticationRequiredException && failure !is DxNetMaintenanceException && runAttemptCount < 2

@@ -24,6 +24,7 @@ import io.github.brainage04.maidex.data.UserDataRepository
 import io.github.brainage04.maidex.data.TrackingSettings
 import io.github.brainage04.maidex.data.UserScore
 import io.github.brainage04.maidex.data.ThemeMode
+import io.github.brainage04.maidex.network.DX_NET_MAINTENANCE_MESSAGE
 import io.github.brainage04.maidex.network.MaimaiDxClient
 import io.github.brainage04.maidex.rating.RatingCalculator
 import io.github.brainage04.maidex.data.normalizeSearch
@@ -427,6 +428,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     AutoUpdateWorker.OUTCOME_FAILED -> {
                         importStatus.value = ImportStatus.Failure(message ?: "Automatic DX NET update failed")
                         autoUpdateEvents.trySend("Automatic DX NET update failed: ${message.orEmpty()}")
+                    }
+                    AutoUpdateWorker.OUTCOME_MAINTENANCE -> {
+                        importStatus.value = ImportStatus.Failure(DX_NET_MAINTENANCE_MESSAGE)
+                        autoUpdateEvents.trySend(DX_NET_MAINTENANCE_MESSAGE)
                     }
                     else -> if (importStatus.value is ImportStatus.Running) importStatus.value = ImportStatus.Idle
                 }

@@ -1,6 +1,7 @@
 package io.github.brainage04.maidex.tracking
 
 import io.github.brainage04.maidex.network.AuthenticationRequiredException
+import io.github.brainage04.maidex.network.DxNetMaintenanceException
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -29,5 +30,10 @@ class CircleTrackingWorkerTest {
                 runAttemptCount = 0,
             ),
         )
+    }
+
+    @Test
+    fun `hourly sync leaves maintenance to the next hourly run`() {
+        assertEquals(false, shouldRetryHourlySync(DxNetMaintenanceException(), runAttemptCount = 0))
     }
 }

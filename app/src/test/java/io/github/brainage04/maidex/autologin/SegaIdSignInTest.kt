@@ -1,5 +1,7 @@
 package io.github.brainage04.maidex.autologin
 
+import io.github.brainage04.maidex.network.DxNetMaintenanceException
+import io.github.brainage04.maidex.network.DxNetMaintenanceTest
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -11,6 +13,7 @@ import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -23,6 +26,8 @@ class SegaIdSignInTest {
     private val posts = mutableListOf<Map<String, String>>()
     private var loginPage = LOGIN_PAGE
     private var loginStatus = 200
+    private var dxNetMaintenance = false
+    private var gatewayMaintenance = false
 
     private val cookies = mutableMapOf<String, Cookie>()
     private val http = OkHttpClient.Builder()
@@ -40,6 +45,11 @@ class SegaIdSignInTest {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.path.orEmpty()
                 return when {
+                    path == "/maimai-mobile/" && dxNetMaintenance ->
+                        MockResponse().setResponseCode(503).setBody(DxNetMaintenanceTest.DX_NET_503_PAGE)
+                    path == "/maimai-mobile/" && gatewayMaintenance -> redirect("/common_auth/maintenance.html")
+                    path == "/common_auth/maintenance.html" ->
+                        MockResponse().setBody(DxNetMaintenanceTest.GATEWAY_MAINTENANCE_PAGE)
                     path == "/maimai-mobile/" && request.getHeader("Cookie")?.contains("userId=signed-in") == true ->
                         redirect("/maimai-mobile/home/")
                     path == "/maimai-mobile/" -> redirect("/common_auth/login?site_id=maimaidxex")
@@ -80,6 +90,22 @@ class SegaIdSignInTest {
         sitePrefix = server.url("/maimai-mobile/").toString(),
         credentials = DxNetCredentials(username, password),
     )
+
+    @Test
+    fun gatewayMaintenancePageIsReportedAsMaintenanceWithoutPosting() {
+        gatewayMaintenance = true
+
+        assertThrows(DxNetMaintenanceException::class.java) { signIn() }
+        assertTrue(posts.isEmpty())
+    }
+
+    @Test
+    fun dxNetMaintenanceIsReportedAsMaintenanceWithoutPosting() {
+        dxNetMaintenance = true
+
+        assertThrows(DxNetMaintenanceException::class.java) { signIn() }
+        assertTrue(posts.isEmpty())
+    }
 
     @Test
     fun postsSegaIdFormAndEndsSignedIn() {

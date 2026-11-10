@@ -194,6 +194,7 @@ import io.github.brainage04.maidex.data.SyncMedal
 import io.github.brainage04.maidex.data.TrackingSettings
 import io.github.brainage04.maidex.data.UserScore
 import io.github.brainage04.maidex.data.normalizeSearch
+import io.github.brainage04.maidex.network.DX_NET_MAINTENANCE_MESSAGE
 import io.github.brainage04.maidex.rating.AchievementLossCalculator
 import io.github.brainage04.maidex.rating.RatingCalculator
 import java.time.Instant
@@ -3155,6 +3156,15 @@ private fun OfficialPageCard(title: String, html: String) {
     }
 }
 
+/** Status line of the Circle sync card. Maintenance is not a failure, so it is shown on its own. */
+internal fun circleSyncStatus(isSyncing: Boolean, lastError: String, lastSuccessAt: Long): String = when {
+    isSyncing -> "Syncing now…"
+    lastError == DX_NET_MAINTENANCE_MESSAGE -> "$DX_NET_MAINTENANCE_MESSAGE; try again later"
+    lastError.isNotBlank() -> "Last sync failed: $lastError"
+    lastSuccessAt > 0L -> "Last synced ${formatTrackedTime(lastSuccessAt)}"
+    else -> "Not synced yet"
+}
+
 @Composable
 private fun CircleTrackingCard(
     settings: TrackingSettings,
@@ -3171,18 +3181,11 @@ private fun CircleTrackingCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Circle data sync", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    val status = when {
-                        isSyncing -> "Syncing now…"
-                        lastError.isNotBlank() ->
-                            "Last sync failed: $lastError"
-                        settings.lastSuccessAt > 0L ->
-                            "Last synced ${formatTrackedTime(settings.lastSuccessAt)}"
-                        else -> "Not synced yet"
-                    }
+                    val status = circleSyncStatus(isSyncing, lastError, settings.lastSuccessAt)
                     Text(
                         status,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (lastError.isBlank() || isSyncing) {
+                        color = if (lastError.isBlank() || isSyncing || lastError == DX_NET_MAINTENANCE_MESSAGE) {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         } else {
                             MaterialTheme.colorScheme.error

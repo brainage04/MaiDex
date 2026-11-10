@@ -40,6 +40,7 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import org.jsoup.safety.Cleaner
 import org.jsoup.safety.Safelist
+import java.io.IOException
 import java.time.Instant
 import java.net.URI
 import java.time.YearMonth
@@ -312,22 +313,7 @@ class MaimaiDxClient(
             .header("Referer", region.loginUrl)
             .build()
         return client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) error("DX NET returned HTTP ${response.code}")
-            val finalUrl = response.request.url.toString()
-            if (
-                !finalUrl.startsWith(region.baseUrl) ||
-                finalUrl.substringBefore('?').trimEnd('/') ==
-                "${region.baseUrl}/maimai-mobile".trimEnd('/')
-            ) {
-                throw AuthenticationRequiredException("DX NET login expired; sign in again")
-            }
-            val document = Jsoup.parse(response.body?.string().orEmpty(), finalUrl)
-            if (document.selectFirst("img[src*=title_error]") != null &&
-                Regex("""ERROR CODE\s*[:：]\s*(?:100001|200002)\b""").containsMatchIn(document.text())
-            ) {
-                throw AuthenticationRequiredException("DX NET session expired; sign in again")
-            }
-            document
+            checkDxNetResponse(region, response.request.url, response.code, response.body?.string().orEmpty())
         }
     }
 
@@ -1174,6 +1160,49 @@ internal fun extractRecentTitle(titleElement: Element): String =
 
 
 class AuthenticationRequiredException(message: String) : IllegalStateException(message)
+
+/** Shown instead of a sign-in error while DX NET or SEGA's sign-in gateway is in maintenance. */
+const val DX_NET_MAINTENANCE_MESSAGE = "DX NET is under maintenance"
+
+/**
+ * DX NET or SEGA's Aime sign-in gateway is in its scheduled maintenance. This is not an expired
+ * login: signing in again would not help, so nothing treats it as one.
+ */
+class DxNetMaintenanceException : IOException(DX_NET_MAINTENANCE_MESSAGE)
+
+private val MaintenanceText = Regex("""under maintenance|メンテナンス""", RegexOption.IGNORE_CASE)
+
+/**
+ * Recognises the two maintenance answers: the gateway redirects to its own page
+ * (`lng-tgk-aime-gw.am-all.net/common_auth/maintenance.html`), and DX NET itself answers HTTP 503
+ * with a "maimai DX NET is under maintenance" page during its daily window.
+ */
+internal fun isDxNetMaintenance(url: HttpUrl, code: Int, body: String): Boolean =
+    url.pathSegments.lastOrNull().orEmpty().startsWith("maintenance", ignoreCase = true) ||
+        (code == 503 && MaintenanceText.containsMatchIn(body))
+
+/**
+ * Turns one DX NET page response into a document, or the reason there is none: maintenance, an
+ * HTTP error, or an expired login (sent back to the start page, or DX NET's session error page).
+ */
+internal fun checkDxNetResponse(region: AccountRegion, finalUrl: HttpUrl, code: Int, body: String): Document {
+    if (isDxNetMaintenance(finalUrl, code, body)) throw DxNetMaintenanceException()
+    if (code !in 200..299) error("DX NET returned HTTP $code")
+    val url = finalUrl.toString()
+    if (
+        !url.startsWith(region.baseUrl) ||
+        url.substringBefore('?').trimEnd('/') == "${region.baseUrl}/maimai-mobile".trimEnd('/')
+    ) {
+        throw AuthenticationRequiredException("DX NET login expired; sign in again")
+    }
+    val document = Jsoup.parse(body, url)
+    if (document.selectFirst("img[src*=title_error]") != null &&
+        Regex("""ERROR CODE\s*[:：]\s*(?:100001|200002)\b""").containsMatchIn(document.text())
+    ) {
+        throw AuthenticationRequiredException("DX NET session expired; sign in again")
+    }
+    return document
+}
 
 internal class ChartLookup(charts: List<SongChart>) {
     private val exact = charts.associateBy {

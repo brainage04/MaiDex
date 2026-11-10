@@ -9,6 +9,8 @@ import io.github.brainage04.maidex.autologin.RecordingReporter
 import io.github.brainage04.maidex.autologin.SignInResult
 import io.github.brainage04.maidex.autologin.SoftwareAesCipher
 import io.github.brainage04.maidex.data.AccountRegion
+import io.github.brainage04.maidex.network.DX_NET_MAINTENANCE_MESSAGE
+import io.github.brainage04.maidex.network.DxNetMaintenanceException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -122,5 +124,28 @@ class TrackingAutoSignInTest {
         assertEquals(TrackingSyncResult.RETRY, hourlySync(runAttemptCount = 0))
         assertEquals(TrackingSyncResult.DONE, hourlySync(runAttemptCount = 2))
         assertEquals(0, site.signInCalls)
+    }
+
+    @Test
+    fun dxNetMaintenanceIsRecordedAsMaintenanceWithoutSignInOrRetry() = runTest {
+        optIn()
+        site.failure = DxNetMaintenanceException()
+
+        assertEquals(TrackingSyncResult.DONE, hourlySync(runAttemptCount = 0))
+        assertEquals(0, site.signInCalls)
+        assertEquals(listOf(DX_NET_MAINTENANCE_MESSAGE), failures)
+        assertTrue(reporter.events.isEmpty())
+    }
+
+    @Test
+    fun gatewayMaintenanceDuringReSignInIsRecordedAsMaintenance() = runTest {
+        optIn()
+        site.signInFailure = DxNetMaintenanceException()
+
+        assertEquals(TrackingSyncResult.DONE, hourlySync())
+        assertEquals(1, site.signInCalls)
+        assertEquals(listOf(DX_NET_MAINTENANCE_MESSAGE), failures)
+        assertEquals("finished:$DX_NET_MAINTENANCE_MESSAGE", reporter.events.last())
+        assertEquals(null, store.rejectionMessage)
     }
 }

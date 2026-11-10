@@ -1,11 +1,12 @@
 package io.github.brainage04.maidex.autologin
 
+import io.github.brainage04.maidex.network.DxNetMaintenanceException
+import io.github.brainage04.maidex.network.isDxNetMaintenance
 import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import java.io.IOException
@@ -92,15 +93,14 @@ class SegaIdSignIn(
 
     private fun fetch(request: Request): Pair<HttpUrl, Document> =
         http.newCall(request.newBuilder().header("User-Agent", USER_AGENT).build()).execute().use { response ->
-            response.requireSuccess()
             val finalUrl = response.request.url
-            finalUrl to Jsoup.parse(response.body?.string().orEmpty(), finalUrl.toString())
+            val body = response.body?.string().orEmpty()
+            // Maintenance is neither a wrong password nor a changed page: report it as itself.
+            if (isDxNetMaintenance(finalUrl, response.code, body)) throw DxNetMaintenanceException()
+            // Server errors and throttling are transient; surface them as network failures.
+            if (!response.isSuccessful) throw IOException("DX NET sign-in returned HTTP ${response.code}")
+            finalUrl to Jsoup.parse(body, finalUrl.toString())
         }
-
-    private fun Response.requireSuccess() {
-        // Server errors and throttling are transient; surface them as network failures.
-        if (!isSuccessful) throw IOException("DX NET sign-in returned HTTP $code")
-    }
 
     companion object {
         const val DEFAULT_LOGIN_HOST = "lng-tgk-aime-gw.am-all.net"

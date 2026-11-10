@@ -2,6 +2,8 @@ package io.github.brainage04.maidex.autologin
 
 import io.github.brainage04.maidex.data.AccountRegion
 import io.github.brainage04.maidex.network.AuthenticationRequiredException
+import io.github.brainage04.maidex.network.DX_NET_MAINTENANCE_MESSAGE
+import io.github.brainage04.maidex.network.DxNetMaintenanceException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.IOException
@@ -55,6 +57,14 @@ sealed interface AutoUpdateOutcome {
     data class Failed(val reason: FailureReason, val message: String) : Finished {
         override val summary: String get() = message
     }
+
+    /**
+     * DX NET or the sign-in gateway was in maintenance. Not a failed sign-in: nothing is paused,
+     * and the next app open or hourly run tries again.
+     */
+    data object Maintenance : Finished {
+        override val summary: String get() = DX_NET_MAINTENANCE_MESSAGE
+    }
 }
 
 enum class FailureReason { WRONG_CREDENTIALS, SITE_REJECTED, SITE_CHANGED, NETWORK, CREDENTIALS_UNREADABLE, OTHER }
@@ -102,6 +112,8 @@ class AutoUpdateRunner(
             attempt()
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (_: DxNetMaintenanceException) {
+            AutoUpdateOutcome.Maintenance
         } catch (failure: IOException) {
             AutoUpdateOutcome.Failed(
                 FailureReason.NETWORK,

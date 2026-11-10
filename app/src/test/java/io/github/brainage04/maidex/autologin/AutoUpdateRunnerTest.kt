@@ -2,6 +2,8 @@ package io.github.brainage04.maidex.autologin
 
 import io.github.brainage04.maidex.data.AccountRegion
 import io.github.brainage04.maidex.network.AuthenticationRequiredException
+import io.github.brainage04.maidex.network.DX_NET_MAINTENANCE_MESSAGE
+import io.github.brainage04.maidex.network.DxNetMaintenanceException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -125,6 +127,29 @@ class AutoUpdateRunnerTest {
     }
 
     @Test
+    fun dxNetMaintenanceIsReportedAsMaintenanceNotAsAnExpiredLogin() = runTest {
+        optIn()
+        site.failure = DxNetMaintenanceException()
+
+        assertEquals(AutoUpdateOutcome.Maintenance, run())
+        assertEquals("no sign-in during maintenance", 0, site.signInCalls)
+        assertEquals("finished:$DX_NET_MAINTENANCE_MESSAGE", reporter.events.last())
+        assertNull("automatic sign-in is not paused", store.rejectionMessage)
+        assertEquals(DX_NET_MAINTENANCE_MESSAGE, store.lastResult)
+    }
+
+    @Test
+    fun gatewayMaintenanceDuringSignInIsMaintenanceAndDoesNotPause() = runTest {
+        optIn()
+        site.signInFailure = DxNetMaintenanceException()
+
+        assertEquals(AutoUpdateOutcome.Maintenance, run())
+        assertEquals(1, site.signInCalls)
+        assertNull(store.rejectionMessage)
+        assertTrue("credentials are kept", store.hasCredentials)
+    }
+
+    @Test
     fun sitePageChangeFailsWithoutPausingCredentials() = runTest {
         optIn()
         site.signInResult = SignInResult.PageChanged("The SEGA ID sign-in form was not found on DX NET")
@@ -214,6 +239,7 @@ class FakeDxNet : DxNetSignIn {
     var acceptSession = true
     var failure: Exception? = null
     var signInResult: SignInResult? = null
+    var signInFailure: Exception? = null
     var refreshCalls = 0
     var signInCalls = 0
     var saved = 0
@@ -231,6 +257,7 @@ class FakeDxNet : DxNetSignIn {
     override suspend fun signIn(region: AccountRegion, credentials: DxNetCredentials): SignInResult {
         signInCalls += 1
         lastCredentials = credentials
+        signInFailure?.let { throw it }
         signInResult?.let { return it }
         if (credentials.password != "right") {
             return SignInResult.InvalidCredentials("SEGA ID or password is incorrect.")
